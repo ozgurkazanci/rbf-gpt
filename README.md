@@ -20,15 +20,23 @@ Fast radial basis function (RBF) networks.
   3. **Matmul-form distances** — ‖x−c‖² is expanded to ‖x‖² − 2x·c + ‖c‖² so
      distances come from a single GEMM instead of broadcast subtraction.
 
-Measured on CPU (batch 2048, dim 128, 1024 centers):
+The routing is genuinely differentiable: selected groups' activations are
+weighted by a softmax gate over prototype distances (MoE-style), so the
+prototypes train with everything else. `init_from_data` warm-starts with a
+few k-means steps so each group's centers cluster around its prototype
+(nearest-center routing recall ≈ 0.88 vs 0.125 chance), and scales the
+bandwidths to the data so activations never underflow.
 
-| model    | forward       | train MSE |
-|----------|---------------|-----------|
-| NaiveRBF | ~426 ms/iter  | 0.0577    |
-| TurboRBF | ~11 ms/iter   | 0.0030    |
+Measured on CPU (batch 2048, dim 128, 1024 centers; both models
+data-warm-started, trained identically):
 
-≈ **40× faster** forward pass, with better fit in the same number of steps
-(the learned metric + data-driven warm start help optimisation).
+| model    | forward         | train MSE |
+|----------|-----------------|-----------|
+| NaiveRBF | ~430–470 ms/iter | 0.056    |
+| TurboRBF | ~11–16 ms/iter   | 0.0001   |
+
+≈ **30–40× faster** forward pass, with a better fit in the same number of
+steps.
 
 ## mini_gpt_rbf.py — RBF-kernel attention'lı mini GPT
 

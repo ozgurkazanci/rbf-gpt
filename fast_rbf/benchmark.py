@@ -42,6 +42,8 @@ def main():
 
     naive = NaiveRBF(D, M, OUT)
     turbo = TurboRBF(D, M, OUT, rank=16, num_groups=32, active_groups=4)
+    # Warm-start BOTH models on the data so the quality comparison is fair.
+    naive.init_from_data(x)
     turbo.init_from_data(x)
 
     t_naive = time_forward(naive, x)

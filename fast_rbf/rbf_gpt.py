@@ -106,13 +106,13 @@ class RBFGPT(nn.Module):
         return idx
 
     def warm_start(self, idx):
-        """Warm-start every TurboRBF FFN from real token activations."""
+        """Warm-start every RBF FFN (naive or turbo) from real activations."""
         with torch.no_grad():
             B, T = idx.shape
             pos = torch.arange(T, device=idx.device)
             x = self.tok_emb(idx) + self.pos_emb(pos)
             for block in self.blocks:
-                if isinstance(block.ffn, TurboRBF):
+                if hasattr(block.ffn, "init_from_data"):
                     flat = block.ln2(x + block.attn(block.ln1(x)))
                     block.ffn.init_from_data(flat.view(-1, flat.shape[-1]))
                 x = block(x)
@@ -133,8 +133,10 @@ without sorrow, for its contribution was already nothing.
 """ * 20
 
 
-def _batches(data, block_size, batch_size, device):
-    ix = torch.randint(len(data) - block_size - 1, (batch_size,))
+def _batches(data, block_size, batch_size, device, gen=None):
+    # A dedicated generator keeps the batch stream identical across model
+    # variants even though model construction consumes global RNG.
+    ix = torch.randint(len(data) - block_size - 1, (batch_size,), generator=gen)
     x = torch.stack([data[i:i + block_size] for i in ix]).to(device)
     y = torch.stack([data[i + 1:i + block_size + 1] for i in ix]).to(device)
     return x, y
@@ -151,14 +153,15 @@ def run_demo(steps=200, block_size=64, batch_size=16, device="cpu"):
     for kind in ("naive", "turbo"):
         torch.manual_seed(0)
         model = RBFGPT(len(chars), block_size, ffn=kind).to(device)
-        xb, yb = _batches(data, block_size, batch_size, device)
-        if kind == "turbo":
-            model.warm_start(xb)
+        gen = torch.Generator().manual_seed(123)
+        xb, yb = _batches(data, block_size, batch_size, device, gen)
+        # Warm-start both variants so the quality comparison is fair.
+        model.warm_start(xb)
 
         opt = torch.optim.AdamW(model.parameters(), lr=3e-3)
         t0, loss = time.perf_counter(), None
         for step in range(steps):
-            xb, yb = _batches(data, block_size, batch_size, device)
+            xb, yb = _batches(data, block_size, batch_size, device, gen)
             _, loss = model(xb, yb)
             opt.zero_grad()
             loss.backward()
