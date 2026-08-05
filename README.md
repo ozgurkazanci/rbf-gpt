@@ -30,6 +30,28 @@ Measured on CPU (batch 2048, dim 128, 1024 centers):
 ≈ **40× faster** forward pass, with better fit in the same number of steps
 (the learned metric + data-driven warm start help optimisation).
 
+## mini_gpt_rbf.py — RBF-kernel attention'lı mini GPT
+
+`mini_gpt_rbf.py` is a single-file char-level GPT whose attention can run as a
+Gaussian (RBF) kernel with a learnable per-head width σ. TurboRBF integration
+adds two speedups:
+
+- `--rbf-impl fast` (default) — because softmax normalises per row, the
+  −‖q‖²/2σ² term cancels; embedding the key-norm correction as one extra
+  dimension (`q̂=[q/σ, 1]`, `k̂=[k/σ, −‖k‖²/2σ²]`) makes RBF attention run on
+  the fused `scaled_dot_product_attention` kernel with **bit-for-bit
+  equivalent math** (verified: max logit diff 8e-7, max grad diff 1.4e-8).
+  ~2.1× faster forward at T=512 on CPU; much larger gains on CUDA where the
+  fused kernel avoids materialising the T×T score matrix.
+- `--mlp turbo-rbf` — replaces each block's MLP with a `TurboRBF` layer
+  (the file's own "experiment #2").
+
+```bash
+python mini_gpt_rbf.py --attention rbf                  # fast RBF attention
+python mini_gpt_rbf.py --attention rbf --rbf-impl naive # original slow path
+python mini_gpt_rbf.py --attention rbf --mlp turbo-rbf  # fully-RBF model
+```
+
 ## Usage
 
 ```bash
