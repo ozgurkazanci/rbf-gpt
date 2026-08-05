@@ -60,6 +60,24 @@ python mini_gpt_rbf.py --attention rbf --rbf-impl naive # original slow path
 python mini_gpt_rbf.py --attention rbf --mlp turbo-rbf  # fully-RBF model
 ```
 
+### AMD Radeon (DirectML) ile çalıştırma — Windows
+
+Entegre/harici tüm DX12 Radeon'larda (ör. Radeon 780M) çalışır. **Windows
+Python'ında** (WSL'de değil, PowerShell'de) kurun:
+
+```powershell
+py -3.11 -m venv rbfenv
+rbfenv\Scripts\activate
+pip install torch-directml
+git clone https://github.com/ozgurkazanci/rbf-gpt
+cd rbf-gpt
+python mini_gpt_rbf.py --attention rbf --device dml --iters 1000
+```
+
+`torch-directml`, uyumlu PyTorch sürümünü kendisi kurar (Python 3.11 veya
+altı gerekir). Fused attention DML'de desteklenmezse `--rbf-impl naive`
+ekleyin — aynı matematik, temel işlemlerle.
+
 ## Usage
 
 ```bash

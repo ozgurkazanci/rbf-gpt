@@ -87,7 +87,9 @@ def get_args():
     p.add_argument("--dropout", type=float, default=0.1)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--seed", type=int, default=1337)
-    p.add_argument("--device", default="auto", help="'cuda', 'cpu' veya 'auto'")
+    p.add_argument("--device", default="auto",
+                   help="'cuda', 'cpu', 'dml' (AMD Radeon / DirectML, Windows) "
+                        "veya 'auto'. 'dml' için: pip install torch-directml")
     p.add_argument("--eval-interval", type=int, default=250)
     p.add_argument("--sample-chars", type=int, default=400,
                    help="Eğitim sonunda üretilecek örnek metin uzunluğu")
@@ -369,6 +371,11 @@ def main():
 
     if cfg.device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    elif cfg.device == "dml":
+        # AMD Radeon (veya herhangi bir DX12 GPU) — DirectML backend'i.
+        # Windows Python'ında çalışır (WSL'de değil): pip install torch-directml
+        import torch_directml
+        device = torch_directml.device()
     else:
         device = cfg.device
     extra = f" ({cfg.rbf_impl})" if cfg.attention == "rbf" else ""
@@ -415,6 +422,12 @@ def main():
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
+
+    # DirectML tensörleri checkpoint kaydı ve üretim için CPU'ya alınır
+    # (torch.save ve multinomial DML cihazında güvenilir değildir).
+    if cfg.device == "dml":
+        model = model.to("cpu")
+        device = "cpu"
 
     # --- Checkpoint kaydet (bunu GitHub/HF Hub'a push'layın -> bulut!) ---
     ckpt_path = f"ckpt_{cfg.attention}.pt"
