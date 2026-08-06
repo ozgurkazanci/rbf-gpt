@@ -42,6 +42,9 @@ KNOWN_TOOLS = {
     "lec": None,            # CONFRML232: Conformal eşdeğerlik kontrolü
 }
 
+# Süreç tasarım kitleri (PDK) kök dizini — 65nm kitler burada yaşar.
+PDK_ROOT = "/opt/eda/PDK"
+
 # ~/.bashrc'de PATH'e eklenmemiş kurulumlar: köprü, bu dizinlerden var
 # olanları her komuttan önce PATH'e ekler (SSV: tempus/voltus, Conformal).
 EXTRA_PATH_DIRS = [
@@ -195,6 +198,33 @@ class CadenceBridge:
     def run_spectre(self, netlist_path):
         """Spectre'ı doğrudan bir netlist üzerinde koşar."""
         return self.run(f"spectre {shlex.quote(netlist_path)}")
+
+    def pdk_report(self, root=PDK_ROOT):
+        """PDK envanteri: kitler, Spectre model dosyaları, köşe bölümleri.
+
+        Gerçek transistörlü simülasyon yazabilmek için gereken üç bilgiyi
+        toplar: hangi kitler var, spectre model .scs dosyaları nerede ve
+        model dosyalarında hangi section (tt/ss/ff) adları geçiyor.
+        """
+        q = shlex.quote(root)
+        probes = [
+            ("kitler", f"ls {q} 2>/dev/null || echo 'PDK koku yok: {root}'"),
+            ("model_dizinleri",
+             f"find {q} -maxdepth 5 -type d \\( -iname '*model*' -o -iname 'spectre' \\) 2>/dev/null | head -20"),
+            ("scs_dosyalari",
+             f"find {q} -maxdepth 7 -iname '*.scs' 2>/dev/null | head -40"),
+            ("kose_ornekleri",
+             f"for f in $(find {q} -maxdepth 7 -iname '*.scs' 2>/dev/null | head -5); do "
+             f"echo \"--- $f\"; grep -m 6 -E '^section|^simulator|include' \"$f\" 2>/dev/null; done"),
+        ]
+        report = {}
+        for key, cmd in probes:
+            try:
+                _, out, err = self.run(cmd, timeout=180)
+                report[key] = out or err or "(bos)"
+            except Exception as exc:
+                report[key] = f"HATA: {exc}"
+        return report
 
     # Köprü doğrulama devresi: RC alçak geçiren filtre (PDK gerektirmez).
     # tau = R*C = 1us; kaynak 1us'de 0->1V basar, out 10us'de ~1V'a oturur.

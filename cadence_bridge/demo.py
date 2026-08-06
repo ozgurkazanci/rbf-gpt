@@ -32,6 +32,7 @@ def main():
     sub.add_parser("check", help="WSL erisimi + arac PATH kontrolu")
     sub.add_parser("env", help="ortam teshisi: PATH, bashrc, kurulum dizini")
     sub.add_parser("firstsim", help="uctan uca ilk Spectre simulasyonu (RC devresi)")
+    sub.add_parser("pdk", help="PDK envanteri: kitler, spectre modelleri, koseler")
     sub.add_parser("virtuoso", help="Virtuoso GUI'yi baslat (virtuoso -64 &)")
     for name, hlp in [("skill", "SKILL betigi (.il) batch calistir"),
                       ("ocean", "OCEAN betigi (.ocn) batch calistir"),
@@ -61,6 +62,13 @@ def main():
 
     if args.cmd == "env":
         for key, val in br.env_report().items():
+            print(f"===== {key} =====")
+            print(val)
+            print()
+        return
+
+    if args.cmd == "pdk":
+        for key, val in br.pdk_report().items():
             print(f"===== {key} =====")
             print(val)
             print()
