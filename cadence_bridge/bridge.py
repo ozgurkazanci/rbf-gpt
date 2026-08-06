@@ -83,34 +83,34 @@ class CadenceBridge:
         """
         if background:
             command = f"nohup {command} >/dev/null 2>&1 & disown; echo BASLATILDI"
-        env = (f"source {shlex.quote(self.env_script)}; " if self.env_script
-               else "[ -f ~/.cadence_env.sh ] && source ~/.cadence_env.sh; ")
+        # ~/.bashrc her zaman elle kaynaklanir: stdin'den beslenen login kabugu
+        # .bash_profile -> .bashrc zincirine guvenmek zorunda kalmasin.
+        env = "[ -f ~/.bashrc ] && source ~/.bashrc; "
+        env += (f"source {shlex.quote(self.env_script)}; " if self.env_script
+                else "[ -f ~/.cadence_env.sh ] && source ~/.cadence_env.sh; ")
         extra = " ".join(shlex.quote(d) for d in EXTRA_PATH_DIRS)
         env += (f'for _d in {extra}; do [ -d "$_d" ] && PATH="$PATH:$_d"; done; '
                 "export PATH; ")
         shell_cmd = f"{env}cd {shlex.quote(self.workdir)} && {command}"
 
-        # Komut base64 ile paketlenir: Windows -> wsl.exe -> bash gecisinde
-        # tirnak/ozel karakterler bozulur (CommandLineToArgvW). base64 govde
-        # yalnizca guvenli karakterler icerdigi icin hicbir katman bozamaz.
-        enc = base64.b64encode(shell_cmd.encode("utf-8")).decode("ascii")
-        wrapped = f'eval "$(echo {enc} | base64 --decode)"'
-
-        # "-lic": login + interaktif kabuk. Interaktif bayragi onemli: cogu
-        # ~/.bashrc dosyasi "interaktif degilsen cik" korumasiyla baslar ve
-        # Cadence PATH ayarlari o korumanin arkasinda kalir.
+        # Betik, argüman yerine STDIN üzerinden bash'e akıtılır. Windows ->
+        # wsl.exe -> bash argüman geçişi tırnak/özel karakterleri bozuyor
+        # (CommandLineToArgvW + wsl'nin yeniden birleştirmesi); stdin yolunda
+        # aktarılan argümanlar sadece sabit bayraklar olduğundan bozulacak
+        # hiçbir şey kalmaz. "-l" login kabuğudur; .bashrc yukarıda elle
+        # kaynaklandığı için ortam her durumda yüklenir.
         if self.inside_wsl:
-            argv = ["bash", "-lic", wrapped]
+            argv = ["bash", "-l", "-s"]
         else:
             if not self.wsl_exe:
                 raise RuntimeError(
                     "wsl.exe bulunamadı — bu komut Windows PowerShell'den ya da "
                     "WSL içinden çalıştırılmalı.")
             argv = [self.wsl_exe, "-d", self.distro, "-u", self.user,
-                    "--", "bash", "-lic", wrapped]
+                    "--", "bash", "-l", "-s"]
 
-        proc = subprocess.run(argv, capture_output=True, text=True,
-                              timeout=timeout, encoding="utf-8",
+        proc = subprocess.run(argv, input=shell_cmd, capture_output=True,
+                              text=True, timeout=timeout, encoding="utf-8",
                               errors="replace")
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
 
