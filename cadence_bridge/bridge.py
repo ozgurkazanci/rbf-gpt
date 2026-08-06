@@ -264,6 +264,73 @@ saveOptions options save=allpub
     # ---------------------------------- gerçek PDK ile evirici simülasyonu
     MODELS_ONLINE = f"{PDK_ROOT}/CRN65GPNEW/CRN65GPNEW/models/online"
 
+    def discover_models(self):
+        """PDK'daki model klasörünü, tt köşesini ve köşe dosyasını bulur.
+
+        Sonuç önbelleğe alınır: ajan döngüsü yüzlerce simülasyon koşarken
+        keşif her seferinde tekrarlanmaz.
+        """
+        if getattr(self, "_models_cache", None):
+            return self._models_cache
+        probe = (
+            f"ls {self.MODELS_ONLINE} 2>/dev/null; echo ===; "
+            f"for d in {self.MODELS_ONLINE}/*/spectre; do echo DIR:$d; "
+            f"grep -h '^section' $d/cor_std_mos.scs $d/cor.scs 2>/dev/null "
+            f"| head -12; done")
+        rc, out, err = self.run(probe, timeout=120)
+        if rc != 0 or "DIR:" not in out:
+            return {"hata": err or out or "model klasoru bulunamadi"}
+        lines = out.split("DIR:")[1].splitlines()
+        sdir = lines[0].strip()
+        sections = [ln.split()[1] for ln in lines[1:]
+                    if ln.startswith("section") and len(ln.split()) > 1]
+        sec = next((s for s in sections if s.startswith("tt")), None)
+        rc, cor, _ = self.run(
+            f"ls {sdir}/cor_std_mos.scs 2>/dev/null || ls {sdir}/cor.scs")
+        cor = cor.strip().splitlines()[-1] if cor else f"{sdir}/cor.scs"
+        info = {"model_dir": sdir, "section": sec, "corner_file": cor}
+        if sec:
+            self._models_cache = info
+        return info
+
+    def inverter_vtc(self, wn="200n", wp="400n", length="60n", vdd=1.2,
+                     nmos="nch", pmos="pch", corner=None, section=None,
+                     points=121, tag="agent"):
+        """Verilen boyutlarla evirici DC taraması koşar; ham çıktı döner.
+
+        Ajanın parametre araması bu metodu tekrar tekrar çağırır; her çağrı
+        kendi dosya adını (tag) kullanır ki paralel/ardışık koşular
+        birbirinin sonucunu ezmesin.
+        """
+        if corner is None or section is None:
+            info = self.discover_models()
+            if info.get("hata") or not info.get("section"):
+                return 1, "", info.get("hata", "tt kosesi yok")
+            corner = corner or info["corner_file"]
+            section = section or info["section"]
+
+        netlist = f"""// TSMC65 CMOS evirici — ajan parametre taramasi
+simulator lang=spectre
+include "{corner}" section = {section}
+vdd (vdd 0) vsource dc={vdd}
+vin (in 0) vsource dc=0
+mp (out in vdd vdd) {pmos} w={wp} l={length}
+mn (out in 0 0) {nmos} w={wn} l={length}
+vtc dc dev=vin param=dc start=0 stop={vdd} lin={points}
+saveOptions options save=allpub
+"""
+        d = f"{self.workdir}/bridge_test"
+        f = f"inv_{tag}"
+        script = (
+            f"mkdir -p {d} && cd {d} && rm -rf {f}.raw && "
+            f"cat > {f}.scs <<'NETLIST_EOF'\n{netlist}NETLIST_EOF\n"
+            f"spectre {f}.scs -format psfascii -raw {f}.raw "
+            f"> {f}.log 2>&1; echo SPECTRE_RC=$?; "
+            f"grep -m 4 -iE 'error|fatal' {f}.log; echo ---RAW---; "
+            + f"grep -E '^\"(in|out)\"' {f}.raw/vtc.dc 2>/dev/null "
+            + "|| echo RAW_YOK")
+        return self.run(script, timeout=900)
+
     def inverter_sim(self):
         """TSMC65 modelleriyle CMOS evirici DC taraması (VTC) — 4 adım.
 
