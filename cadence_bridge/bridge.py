@@ -27,7 +27,7 @@ DEFAULT_USER = "tonxiao"
 
 # Araç adı -> sürüm bayrağı (kurulum kontrolünde kullanılır)
 KNOWN_TOOLS = {
-    "virtuoso": "-W",       # IC618 (analog/şematik/layout)
+    "virtuoso": "-W",       # IC231 (analog/şematik/layout)
     "spectre": "-W",        # SPECTRE241 (devre simülatörü)
     "ocean": None,          # OCEAN batch (sürüm bayrağı yok, which yeter)
     "genus": "-version",    # sentez (dijital)
@@ -36,7 +36,19 @@ KNOWN_TOOLS = {
     "modus": "-version",    # test (DFT)
     "quantus": "-version",  # parazit çıkarımı
     "pvs": "-version",      # fiziksel doğrulama
+    "tempus": "-version",   # SSV231: statik zamanlama signoff
+    "voltus": "-version",   # SSV231: güç bütünlüğü signoff
+    "lec": None,            # CONFRML232: Conformal eşdeğerlik kontrolü
 }
+
+# ~/.bashrc'de PATH'e eklenmemiş kurulumlar: köprü, bu dizinlerden var
+# olanları her komuttan önce PATH'e ekler (SSV: tempus/voltus, Conformal).
+EXTRA_PATH_DIRS = [
+    "/opt/eda/cadence/SSV231/bin",
+    "/opt/eda/cadence/SSV231/tools.lnx86/bin",
+    "/opt/eda/cadence/CONFRML232/bin",
+    "/opt/eda/cadence/CONFRML232/tools.lnx86/bin",
+]
 
 
 class CadenceBridge:
@@ -70,6 +82,9 @@ class CadenceBridge:
             command = f"nohup {command} >/dev/null 2>&1 & disown; echo BASLATILDI"
         env = (f"source {shlex.quote(self.env_script)}; " if self.env_script
                else "[ -f ~/.cadence_env.sh ] && source ~/.cadence_env.sh; ")
+        extra = " ".join(shlex.quote(d) for d in EXTRA_PATH_DIRS)
+        env += (f'for _d in {extra}; do [ -d "$_d" ] && PATH="$PATH:$_d"; done; '
+                "export PATH; ")
         shell_cmd = f"{env}cd {shlex.quote(self.workdir)} && {command}"
 
         # "-lic": login + interaktif kabuk. Interaktif bayragi onemli: cogu
