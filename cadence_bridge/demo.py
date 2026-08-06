@@ -43,7 +43,11 @@ def main():
     sp = sub.add_parser("sh", help="WSL icinde serbest komut")
     sp.add_argument("command")
 
-    args = p.parse_args()
+    args, extra = p.parse_known_args()
+    if extra:
+        # "virtuoso -64 &" aliskanligina hosgoru: bayraklar zaten kopru
+        # icinde uygulanir, fazlaliklari hatayla kesmek yerine yok sayariz.
+        print(f"(not: fazladan argumanlar yok sayildi: {' '.join(extra)})")
     br = CadenceBridge(distro=args.distro, workdir=args.workdir,
                        user=args.user)
 

@@ -46,8 +46,10 @@ KNOWN_TOOLS = {
 EXTRA_PATH_DIRS = [
     "/opt/eda/cadence/SSV231/bin",
     "/opt/eda/cadence/SSV231/tools.lnx86/bin",
+    "/opt/eda/cadence/SSV231/tools/bin",
     "/opt/eda/cadence/CONFRML232/bin",
     "/opt/eda/cadence/CONFRML232/tools.lnx86/bin",
+    "/opt/eda/cadence/CONFRML232/tools/bin",
 ]
 
 
