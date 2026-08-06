@@ -216,6 +216,13 @@ class CadenceBridge:
             ("kose_ornekleri",
              f"for f in $(find {q} -maxdepth 7 -iname '*.scs' 2>/dev/null | head -5); do "
              f"echo \"--- $f\"; grep -m 6 -E '^section|^simulator|include' \"$f\" 2>/dev/null; done"),
+            # Dijital taraf (PDK/65): stdcell Liberty/LEF/Verilog koleksiyonu
+            ("liberty_lib",
+             f"find {q} -maxdepth 8 \\( -iname '*.lib' -o -iname '*.lib.gz' \\) 2>/dev/null | head -25"),
+            ("lef",
+             f"find {q} -maxdepth 8 \\( -iname '*.lef' -o -iname '*.tlef' \\) 2>/dev/null | head -15"),
+            ("verilog_model",
+             f"find {q} -maxdepth 8 -iname '*.v' 2>/dev/null | head -15"),
         ]
         report = {}
         for key, cmd in probes:
