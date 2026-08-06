@@ -283,27 +283,16 @@ saveOptions options save=allpub
         if rc != 0 or "DIR:" not in out:
             return info, rc, out, (err or "model klasoru bulunamadi")
 
-        # 1.2V core'u tercih et; yoksa ilk klasör
+        # İlk klasörü kullan (kitte tek model seti var; ad "2.5V" olsa bile
+        # cor_std_mos.scs'in düz tt bölümü ÇEKİRDEK 1.2V cihazları kapsar).
         blocks = out.split("DIR:")[1:]
-        chosen = None
-        for b in blocks:
-            d = b.splitlines()[0].strip()
-            if "/1.2" in d or "1d2" in d:
-                chosen = b
-                break
-        chosen = chosen or blocks[0]
-        lines = chosen.splitlines()
+        lines = blocks[0].splitlines()
         sdir = lines[0].strip()
         sections = [ln.split()[1] for ln in lines[1:]
                     if ln.startswith("section") and len(ln.split()) > 1]
         # tt ile başlayan bölümü seç (tt, tt_std_mos, ...)
         sec = next((s for s in sections if s.startswith("tt")), None)
-        vdd = 1.2 if ("/1.2" in sdir or "1d2" in sdir) else 2.5
-        # core cihaz adları; 2.5V klasöründe kalındıysa IO cihazları dene
-        dev_n, dev_p, lmin = ("nch", "pch", "60n") if vdd == 1.2 \
-            else ("nch_25", "pch_25", "280n")
-        info.update(model_dir=sdir, section=sec, vdd=vdd,
-                    nmos=dev_n, pmos=dev_p)
+        info.update(model_dir=sdir, section=sec)
         if not sec:
             return info, 1, out, "tt kosesi bulunamadi — cikti ile bakalim"
 
@@ -313,28 +302,41 @@ saveOptions options save=allpub
         cor = cor.strip().splitlines()[-1] if cor else f"{sdir}/cor.scs"
         info["corner_file"] = cor
 
-        # --- 3) netlist üret + koş -----------------------------------------
-        wn, wp = ("200n", "400n") if vdd == 1.2 else ("1u", "2u")
-        netlist = f"""// TSMC65 CMOS evirici — VTC taramasi (kopru 2. tur)
+        # --- 3) netlist üret + koş: önce core, olmazsa IO cihazları --------
+        attempts = [
+            {"nmos": "nch", "pmos": "pch", "l": "60n",
+             "wn": "200n", "wp": "400n", "vdd": 1.2},
+            {"nmos": "nch_25", "pmos": "pch_25", "l": "280n",
+             "wn": "1u", "wp": "2u", "vdd": 2.5},
+        ]
+        d = f"{self.workdir}/bridge_test"
+        last = (1, "", "")
+        for att in attempts:
+            netlist = f"""// TSMC65 CMOS evirici — VTC taramasi (kopru 2. tur)
 simulator lang=spectre
 include "{cor}" section = {sec}
-vdd (vdd 0) vsource dc={vdd}
+vdd (vdd 0) vsource dc={att['vdd']}
 vin (in 0) vsource dc=0
-mp (out in vdd vdd) {dev_p} w={wp} l={lmin}
-mn (out in 0 0) {dev_n} w={wn} l={lmin}
-vtc dc dev=vin param=dc start=0 stop={vdd} lin=121
+mp (out in vdd vdd) {att['pmos']} w={att['wp']} l={att['l']}
+mn (out in 0 0) {att['nmos']} w={att['wn']} l={att['l']}
+vtc dc dev=vin param=dc start=0 stop={att['vdd']} lin=121
 saveOptions options save=allpub
 """
-        d = f"{self.workdir}/bridge_test"
-        script = (
-            f"mkdir -p {d} && cd {d} && "
-            f"cat > inv_vtc.scs <<'NETLIST_EOF'\n{netlist}NETLIST_EOF\n"
-            f"spectre inv_vtc.scs -format psfascii -raw inv_vtc.raw "
-            f"> inv_run.log 2>&1; echo SPECTRE_RC=$?; tail -5 inv_run.log; "
-            f"echo ---RAW---; cat inv_vtc.raw/vtc.dc 2>/dev/null | tail -400 "
-            f"|| echo RAW_YOK")
-        rc, out, err = self.run(script, timeout=900)
-        return info, rc, out, err
+            script = (
+                f"mkdir -p {d} && cd {d} && rm -rf inv_vtc.raw && "
+                f"cat > inv_vtc.scs <<'NETLIST_EOF'\n{netlist}NETLIST_EOF\n"
+                f"spectre inv_vtc.scs -format psfascii -raw inv_vtc.raw "
+                f"> inv_run.log 2>&1; echo SPECTRE_RC=$?; "
+                f"grep -m 6 -iE 'error|fatal' inv_run.log; "
+                f"echo ---RAW---; cat inv_vtc.raw/vtc.dc 2>/dev/null "
+                f"| tail -400 || echo RAW_YOK")
+            rc, out, err = self.run(script, timeout=900)
+            info.update(nmos=att["nmos"], pmos=att["pmos"], vdd=att["vdd"])
+            last = (rc, out, err)
+            if "SPECTRE_RC=0" in out and '"out"' in out:
+                return info, rc, out, err
+            info[f"deneme_{att['nmos']}"] = "basarisiz (log satirlari ciktida)"
+        return info, last[0], last[1], last[2]
 
     # ---------------------------------------------------------------- dijital
     def run_tcl(self, tool, script_path):
