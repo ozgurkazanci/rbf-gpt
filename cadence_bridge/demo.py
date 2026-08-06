@@ -31,6 +31,7 @@ def main():
 
     sub.add_parser("check", help="WSL erisimi + arac PATH kontrolu")
     sub.add_parser("env", help="ortam teshisi: PATH, bashrc, kurulum dizini")
+    sub.add_parser("firstsim", help="uctan uca ilk Spectre simulasyonu (RC devresi)")
     sub.add_parser("virtuoso", help="Virtuoso GUI'yi baslat (virtuoso -64 &)")
     for name, hlp in [("skill", "SKILL betigi (.il) batch calistir"),
                       ("ocean", "OCEAN betigi (.ocn) batch calistir"),
@@ -63,6 +64,28 @@ def main():
             print(f"===== {key} =====")
             print(val)
             print()
+        return
+
+    if args.cmd == "firstsim":
+        import re
+        rc, out, err = br.first_sim()
+        print(out)
+        if err:
+            print("--- stderr ---")
+            print(err)
+        vals = re.findall(r'"out"\s+([-+0-9.eE]+)', out)
+        if not vals:
+            print("\nSONUC: V(out) verisi ayristirilamadi — yukaridaki ciktiyi"
+                  " yapistirin, birlikte bakalim.")
+            return
+        v = float(vals[-1])
+        print(f"\nSONUC: V(out) son deger = {v:.4f} V (beklenen ~1.0 V)")
+        if 0.95 <= v <= 1.05:
+            print("KOPRU DOGRULANDI: netlist yaz -> simule et -> oku dongusu"
+                  " uctan uca calisiyor.")
+        else:
+            print("DIKKAT: deger beklenenden sapmis — cikti ile birlikte"
+                  " degerlendirelim.")
         return
 
     if args.cmd == "virtuoso":

@@ -196,6 +196,34 @@ class CadenceBridge:
         """Spectre'ı doğrudan bir netlist üzerinde koşar."""
         return self.run(f"spectre {shlex.quote(netlist_path)}")
 
+    # Köprü doğrulama devresi: RC alçak geçiren filtre (PDK gerektirmez).
+    # tau = R*C = 1us; kaynak 1us'de 0->1V basar, out 10us'de ~1V'a oturur.
+    FIRST_SIM_NETLIST = """\
+// cadence_bridge dogrulama devresi: RC filtre, tau=1us
+simulator lang=spectre
+v1 (in 0) vsource type=pulse val0=0 val1=1 delay=1u rise=1n
+r1 (in out) resistor r=1k
+c1 (out 0) capacitor c=1n
+tran1 tran stop=10u
+saveOptions options save=allpub
+"""
+
+    def first_sim(self):
+        """Spectre'la uçtan uca ilk simülasyon: netlist yaz, koş, sonucu dök.
+
+        Çıktının sonunda psfascii formatındaki tran verisi bulunur; demo.py
+        bunu ayrıştırıp V(out) son değerini fizikle karşılaştırır.
+        """
+        d = f"{self.workdir}/bridge_test"
+        script = (
+            f"mkdir -p {d} && cd {d} && "
+            f"cat > rc_test.scs <<'NETLIST_EOF'\n{self.FIRST_SIM_NETLIST}NETLIST_EOF\n"
+            f"spectre rc_test.scs -format psfascii -raw rc_test.raw "
+            f"> spectre_run.log 2>&1; echo SPECTRE_RC=$?; "
+            f"tail -3 spectre_run.log; echo ---RAW---; "
+            f"tail -60 rc_test.raw/tran1.tran 2>/dev/null || echo RAW_YOK")
+        return self.run(script, timeout=600)
+
     # ---------------------------------------------------------------- dijital
     def run_tcl(self, tool, script_path):
         """Dijital araçları (genus/innovus/modus...) TCL betiğiyle batch koşar."""
