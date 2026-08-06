@@ -14,6 +14,7 @@ lisans ayarları yüklenir. WSL içinden (Alma_EDA'nın kendisinden)
 çalıştırılırsa ``wsl`` sarmalayıcısı atlanır, komut doğrudan koşar.
 """
 
+import base64
 import os
 import shlex
 import shutil
@@ -89,18 +90,24 @@ class CadenceBridge:
                 "export PATH; ")
         shell_cmd = f"{env}cd {shlex.quote(self.workdir)} && {command}"
 
+        # Komut base64 ile paketlenir: Windows -> wsl.exe -> bash gecisinde
+        # tirnak/ozel karakterler bozulur (CommandLineToArgvW). base64 govde
+        # yalnizca guvenli karakterler icerdigi icin hicbir katman bozamaz.
+        enc = base64.b64encode(shell_cmd.encode("utf-8")).decode("ascii")
+        wrapped = f'eval "$(echo {enc} | base64 --decode)"'
+
         # "-lic": login + interaktif kabuk. Interaktif bayragi onemli: cogu
         # ~/.bashrc dosyasi "interaktif degilsen cik" korumasiyla baslar ve
         # Cadence PATH ayarlari o korumanin arkasinda kalir.
         if self.inside_wsl:
-            argv = ["bash", "-lic", shell_cmd]
+            argv = ["bash", "-lic", wrapped]
         else:
             if not self.wsl_exe:
                 raise RuntimeError(
                     "wsl.exe bulunamadı — bu komut Windows PowerShell'den ya da "
                     "WSL içinden çalıştırılmalı.")
             argv = [self.wsl_exe, "-d", self.distro, "-u", self.user,
-                    "--", "bash", "-lic", shell_cmd]
+                    "--", "bash", "-lic", wrapped]
 
         proc = subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout, encoding="utf-8",
