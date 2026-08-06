@@ -42,6 +42,8 @@ def main():
     sp.add_argument("script")
     sp = sub.add_parser("sh", help="WSL icinde serbest komut")
     sp.add_argument("command")
+    sp = sub.add_parser("lib", help="Cadence kutuphanesinin hucrelerini listele")
+    sp.add_argument("library", help="kutuphane adi (workdir altinda) veya tam yol")
 
     args, extra = p.parse_known_args()
     if extra:
@@ -75,6 +77,8 @@ def main():
         rc, out, err = runner[args.cmd](args.script)
     elif args.cmd == "tcl":
         rc, out, err = br.run_tcl(args.tool, args.script)
+    elif args.cmd == "lib":
+        rc, out, err = br.list_library(args.library)
     else:  # sh
         rc, out, err = br.run(args.command)
 

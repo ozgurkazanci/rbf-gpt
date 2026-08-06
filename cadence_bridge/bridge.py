@@ -155,6 +155,21 @@ class CadenceBridge:
                 report[key] = f"HATA: {exc}"
         return report
 
+    def list_library(self, lib):
+        """Cadence kütüphanesindeki hücreleri ve görünümlerini listeler.
+
+        lib: kütüphane adı (workdir altında aranır) veya mutlak yol.
+        """
+        path = lib if lib.startswith("/") else f"{self.workdir}/{lib}"
+        q = shlex.quote(path)
+        cmd = (
+            f'if [ ! -d {q} ]; then echo "KUTUPHANE YOK: {path}"; exit 1; fi; '
+            f'for c in {q}/*/; do b=$(basename "$c"); '
+            f'case "$b" in .*) continue;; esac; '
+            f'echo "$b : $(ls "$c" 2>/dev/null | tr "\\n" " ")"; done'
+        )
+        return self.run(cmd, timeout=120)
+
     # ---------------------------------------------------------------- analog
     def launch_virtuoso(self):
         """Virtuoso GUI'yi workdir içinde başlatır (virtuoso -64 &)."""
