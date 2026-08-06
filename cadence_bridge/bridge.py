@@ -261,6 +261,81 @@ saveOptions options save=allpub
             f"tail -60 rc_test.raw/tran1.tran 2>/dev/null || echo RAW_YOK")
         return self.run(script, timeout=600)
 
+    # ---------------------------------- gerçek PDK ile evirici simülasyonu
+    MODELS_ONLINE = f"{PDK_ROOT}/CRN65GPNEW/CRN65GPNEW/models/online"
+
+    def inverter_sim(self):
+        """TSMC65 modelleriyle CMOS evirici DC taraması (VTC) — 4 adım.
+
+        1) models/online altındaki voltaj klasörlerini ve köşe dosyalarını
+           keşfet; 2) tt köşesini seç; 3) netlist'i üretip Spectre'da koş;
+        4) psfascii çıktısını dök (Vm hesabı demo.py'de yapılır).
+        Döner: (info_dict, rc, out, err) — out, ham VTC verisini içerir.
+        """
+        info = {}
+        # --- 1) keşif: voltaj klasörleri + köşe bölümleri -------------------
+        probe = (
+            f"ls {self.MODELS_ONLINE} 2>/dev/null; echo ===; "
+            f"for d in {self.MODELS_ONLINE}/*/spectre; do echo DIR:$d; "
+            f"grep -h '^section' $d/cor_std_mos.scs $d/cor.scs 2>/dev/null "
+            f"| head -12; done")
+        rc, out, err = self.run(probe, timeout=120)
+        if rc != 0 or "DIR:" not in out:
+            return info, rc, out, (err or "model klasoru bulunamadi")
+
+        # 1.2V core'u tercih et; yoksa ilk klasör
+        blocks = out.split("DIR:")[1:]
+        chosen = None
+        for b in blocks:
+            d = b.splitlines()[0].strip()
+            if "/1.2" in d or "1d2" in d:
+                chosen = b
+                break
+        chosen = chosen or blocks[0]
+        lines = chosen.splitlines()
+        sdir = lines[0].strip()
+        sections = [ln.split()[1] for ln in lines[1:]
+                    if ln.startswith("section") and len(ln.split()) > 1]
+        # tt ile başlayan bölümü seç (tt, tt_std_mos, ...)
+        sec = next((s for s in sections if s.startswith("tt")), None)
+        vdd = 1.2 if ("/1.2" in sdir or "1d2" in sdir) else 2.5
+        # core cihaz adları; 2.5V klasöründe kalındıysa IO cihazları dene
+        dev_n, dev_p, lmin = ("nch", "pch", "60n") if vdd == 1.2 \
+            else ("nch_25", "pch_25", "280n")
+        info.update(model_dir=sdir, section=sec, vdd=vdd,
+                    nmos=dev_n, pmos=dev_p)
+        if not sec:
+            return info, 1, out, "tt kosesi bulunamadi — cikti ile bakalim"
+
+        # köşe dosyası: cor_std_mos.scs varsa onu, yoksa cor.scs
+        rc, cor, _ = self.run(
+            f"ls {sdir}/cor_std_mos.scs 2>/dev/null || ls {sdir}/cor.scs")
+        cor = cor.strip().splitlines()[-1] if cor else f"{sdir}/cor.scs"
+        info["corner_file"] = cor
+
+        # --- 3) netlist üret + koş -----------------------------------------
+        wn, wp = ("200n", "400n") if vdd == 1.2 else ("1u", "2u")
+        netlist = f"""// TSMC65 CMOS evirici — VTC taramasi (kopru 2. tur)
+simulator lang=spectre
+include "{cor}" section = {sec}
+vdd (vdd 0) vsource dc={vdd}
+vin (in 0) vsource dc=0
+mp (out in vdd vdd) {dev_p} w={wp} l={lmin}
+mn (out in 0 0) {dev_n} w={wn} l={lmin}
+vtc dc dev=vin param=dc start=0 stop={vdd} lin=121
+saveOptions options save=allpub
+"""
+        d = f"{self.workdir}/bridge_test"
+        script = (
+            f"mkdir -p {d} && cd {d} && "
+            f"cat > inv_vtc.scs <<'NETLIST_EOF'\n{netlist}NETLIST_EOF\n"
+            f"spectre inv_vtc.scs -format psfascii -raw inv_vtc.raw "
+            f"> inv_run.log 2>&1; echo SPECTRE_RC=$?; tail -5 inv_run.log; "
+            f"echo ---RAW---; cat inv_vtc.raw/vtc.dc 2>/dev/null | tail -400 "
+            f"|| echo RAW_YOK")
+        rc, out, err = self.run(script, timeout=900)
+        return info, rc, out, err
+
     # ---------------------------------------------------------------- dijital
     def run_tcl(self, tool, script_path):
         """Dijital araçları (genus/innovus/modus...) TCL betiğiyle batch koşar."""

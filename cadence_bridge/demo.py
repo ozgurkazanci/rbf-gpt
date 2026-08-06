@@ -33,6 +33,7 @@ def main():
     sub.add_parser("env", help="ortam teshisi: PATH, bashrc, kurulum dizini")
     sub.add_parser("firstsim", help="uctan uca ilk Spectre simulasyonu (RC devresi)")
     sub.add_parser("pdk", help="PDK envanteri: kitler, spectre modelleri, koseler")
+    sub.add_parser("invsim", help="TSMC65 modelleriyle evirici VTC simulasyonu")
     sub.add_parser("virtuoso", help="Virtuoso GUI'yi baslat (virtuoso -64 &)")
     for name, hlp in [("skill", "SKILL betigi (.il) batch calistir"),
                       ("ocean", "OCEAN betigi (.ocn) batch calistir"),
@@ -72,6 +73,51 @@ def main():
             print(f"===== {key} =====")
             print(val)
             print()
+        return
+
+    if args.cmd == "invsim":
+        import re
+        info, rc, out, err = br.inverter_sim()
+        for k, v in info.items():
+            print(f"{k:12s}: {v}")
+        if "---RAW---" in out:
+            head, raw = out.split("---RAW---", 1)
+            print(head.strip())
+        else:
+            raw = out
+            print(out)
+        if err:
+            print("--- stderr ---")
+            print(err)
+        outs = [float(x) for x in re.findall(r'"out"\s+([-+0-9.eE]+)', raw)]
+        if len(outs) < 10:
+            print("\nSONUC: VTC verisi ayristirilamadi — ciktiyi yapistirin,"
+                  " birlikte bakalim.")
+            return
+        vdd = float(info.get("vdd", 1.2))
+        n = len(outs)
+        vin = [vdd * i / (n - 1) for i in range(n)]
+        # anahtarlama esigi: out'un vin'i kestigi nokta (out ~= vin)
+        vm = None
+        for i in range(1, n):
+            if (outs[i - 1] - vin[i - 1]) * (outs[i] - vin[i]) <= 0:
+                # dogrusal interpolasyon
+                d0 = outs[i - 1] - vin[i - 1]
+                d1 = outs[i] - vin[i]
+                t = d0 / (d0 - d1) if d0 != d1 else 0.5
+                vm = vin[i - 1] + t * (vin[i] - vin[i - 1])
+                break
+        print(f"\nSONUC: {n} noktali VTC alindi | V(out): "
+              f"{outs[0]:.3f} V -> {outs[-1]:.3f} V")
+        if vm is not None:
+            print(f"Anahtarlama esigi Vm = {vm:.3f} V "
+                  f"(VDD/2 = {vdd/2:.2f} V civari beklenir)")
+        if outs[0] > 0.9 * vdd and outs[-1] < 0.1 * vdd:
+            print("GERCEK PDK DOGRULANDI: TSMC65 transistorleriyle evirici"
+                  " karakteristigi dogru cikti.")
+        else:
+            print("DIKKAT: VTC beklenen sekle uymuyor — ciktiyla birlikte"
+                  " degerlendirelim.")
         return
 
     if args.cmd == "firstsim":
