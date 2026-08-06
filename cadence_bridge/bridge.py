@@ -21,6 +21,9 @@ import subprocess
 
 DEFAULT_DISTRO = "Alma_EDA"
 DEFAULT_WORKDIR = "/home/tonxiao/work65"
+# wsl -d Alma_EDA varsayilan olarak root acar; Cadence ayarlari ise
+# tonxiao'nun ~/.bashrc'sindedir. Bu yuzden -u ile kullanici belirtilir.
+DEFAULT_USER = "tonxiao"
 
 # Araç adı -> sürüm bayrağı (kurulum kontrolünde kullanılır)
 KNOWN_TOOLS = {
@@ -40,9 +43,10 @@ class CadenceBridge:
     """WSL içindeki Cadence araçlarına komut gönderen köprü."""
 
     def __init__(self, distro=DEFAULT_DISTRO, workdir=DEFAULT_WORKDIR,
-                 env_script=None):
+                 env_script=None, user=DEFAULT_USER):
         self.distro = distro
         self.workdir = workdir
+        self.user = user
         # Cadence PATH/lisans ayarlarinizi iceren betik (orn. ~/.cadence_env.sh).
         # None ise: varsa ~/.cadence_env.sh otomatik kaynaklanir.
         self.env_script = env_script or os.environ.get("CADENCE_ENV_SCRIPT")
@@ -78,7 +82,8 @@ class CadenceBridge:
                 raise RuntimeError(
                     "wsl.exe bulunamadı — bu komut Windows PowerShell'den ya da "
                     "WSL içinden çalıştırılmalı.")
-            argv = [self.wsl_exe, "-d", self.distro, "--", "bash", "-lic", shell_cmd]
+            argv = [self.wsl_exe, "-d", self.distro, "-u", self.user,
+                    "--", "bash", "-lic", shell_cmd]
 
         proc = subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout, encoding="utf-8",

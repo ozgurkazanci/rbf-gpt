@@ -16,13 +16,17 @@ Kullanım (Windows PowerShell'den veya WSL içinden, repo kökünde):
 
 import argparse
 
-from .bridge import CadenceBridge, DEFAULT_DISTRO, DEFAULT_WORKDIR
+from .bridge import (CadenceBridge, DEFAULT_DISTRO, DEFAULT_USER,
+                     DEFAULT_WORKDIR)
 
 
 def main():
     p = argparse.ArgumentParser(description="Cadence WSL koprusu")
     p.add_argument("--distro", default=DEFAULT_DISTRO)
     p.add_argument("--workdir", default=DEFAULT_WORKDIR)
+    p.add_argument("--user", default=DEFAULT_USER,
+                   help="WSL kullanicisi (Cadence ayarlari bu kullanicinin "
+                        ".bashrc'sinden yuklenir)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("check", help="WSL erisimi + arac PATH kontrolu")
@@ -40,7 +44,8 @@ def main():
     sp.add_argument("command")
 
     args = p.parse_args()
-    br = CadenceBridge(distro=args.distro, workdir=args.workdir)
+    br = CadenceBridge(distro=args.distro, workdir=args.workdir,
+                       user=args.user)
 
     if args.cmd == "check":
         for key, val in br.check().items():
