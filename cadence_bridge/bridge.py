@@ -108,6 +108,31 @@ class CadenceBridge:
                 report[tool] = path
         return report
 
+    def env_report(self):
+        """Ortam teşhisi: PATH, rc dosyalarındaki Cadence izleri, kurulum dizini.
+
+        'check' araçları bulamadığında bu rapor, PATH'in nereden gelmesi
+        gerektiğini gösterir — kullanıcıya soru sormak yerine tek komutla
+        toplanır.
+        """
+        probes = [
+            ("which_virtuoso", "command -v virtuoso || echo YOK"),
+            ("path", "echo $PATH | tr ':' '\\n' | grep -iE 'cadence|eda|IC6|SPECTRE|XCELIUM|GENUS' || echo 'PATH icinde cadence izi yok'"),
+            ("bashrc", "grep -nE 'PATH|cadence|eda|CDS|LM_LICENSE|source' ~/.bashrc 2>/dev/null | head -30 || echo yok"),
+            ("bash_profile", "grep -nE 'PATH|cadence|eda|CDS|LM_LICENSE|source' ~/.bash_profile 2>/dev/null | head -20 || echo yok"),
+            ("kurulum", "ls /opt/eda/cadence 2>/dev/null || echo '/opt/eda/cadence yok'"),
+            ("ic_bin", "ls -d /opt/eda/cadence/IC618/tools*/bin /opt/eda/cadence/IC618/tools/dfII/bin 2>/dev/null || echo 'IC618 bin bulunamadi'"),
+            ("lisans", "env | grep -iE 'CDS|LM_LICENSE' || echo 'lisans degiskeni yok'"),
+        ]
+        report = {}
+        for key, cmd in probes:
+            try:
+                _, out, err = self.run(cmd, timeout=60)
+                report[key] = out or err or "(bos)"
+            except Exception as exc:
+                report[key] = f"HATA: {exc}"
+        return report
+
     # ---------------------------------------------------------------- analog
     def launch_virtuoso(self):
         """Virtuoso GUI'yi workdir içinde başlatır (virtuoso -64 &)."""

@@ -26,6 +26,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("check", help="WSL erisimi + arac PATH kontrolu")
+    sub.add_parser("env", help="ortam teshisi: PATH, bashrc, kurulum dizini")
     sub.add_parser("virtuoso", help="Virtuoso GUI'yi baslat (virtuoso -64 &)")
     for name, hlp in [("skill", "SKILL betigi (.il) batch calistir"),
                       ("ocean", "OCEAN betigi (.ocn) batch calistir"),
@@ -44,6 +45,13 @@ def main():
     if args.cmd == "check":
         for key, val in br.check().items():
             print(f"{key:12s}: {val}")
+        return
+
+    if args.cmd == "env":
+        for key, val in br.env_report().items():
+            print(f"===== {key} =====")
+            print(val)
+            print()
         return
 
     if args.cmd == "virtuoso":
