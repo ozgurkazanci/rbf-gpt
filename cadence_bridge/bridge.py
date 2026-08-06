@@ -328,8 +328,12 @@ saveOptions options save=allpub
                 f"spectre inv_vtc.scs -format psfascii -raw inv_vtc.raw "
                 f"> inv_run.log 2>&1; echo SPECTRE_RC=$?; "
                 f"grep -m 6 -iE 'error|fatal' inv_run.log; "
-                f"echo ---RAW---; cat inv_vtc.raw/vtc.dc 2>/dev/null "
-                f"| tail -400 || echo RAW_YOK")
+                f"echo ---RAW---; "
+                # Sadece in/out satirlari suzulur: kirpma yok, tum sweep
+                # noktalari eksiksiz gelir (tail ile kirpmak sweep'in basini
+                # yiyip yanlis VTC'ye yol aciyordu).
+                + 'grep -E \'^"(in|out)"\' inv_vtc.raw/vtc.dc 2>/dev/null '
+                + "|| echo RAW_YOK")
             rc, out, err = self.run(script, timeout=900)
             info.update(nmos=att["nmos"], pmos=att["pmos"], vdd=att["vdd"])
             last = (rc, out, err)

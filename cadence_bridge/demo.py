@@ -89,14 +89,16 @@ def main():
         if err:
             print("--- stderr ---")
             print(err)
+        # vin ve vout dosyadan okunur (sweep degerleri varsayilmaz)
         outs = [float(x) for x in re.findall(r'"out"\s+([-+0-9.eE]+)', raw)]
-        if len(outs) < 10:
+        vin = [float(x) for x in re.findall(r'"in"\s+([-+0-9.eE]+)', raw)]
+        if len(outs) < 10 or len(vin) < 10:
             print("\nSONUC: VTC verisi ayristirilamadi — ciktiyi yapistirin,"
                   " birlikte bakalim.")
             return
+        n = min(len(vin), len(outs))
+        vin, outs = vin[:n], outs[:n]
         vdd = float(info.get("vdd", 1.2))
-        n = len(outs)
-        vin = [vdd * i / (n - 1) for i in range(n)]
         # anahtarlama esigi: out'un vin'i kestigi nokta (out ~= vin)
         vm = None
         for i in range(1, n):
@@ -107,8 +109,8 @@ def main():
                 t = d0 / (d0 - d1) if d0 != d1 else 0.5
                 vm = vin[i - 1] + t * (vin[i] - vin[i - 1])
                 break
-        print(f"\nSONUC: {n} noktali VTC alindi | V(out): "
-              f"{outs[0]:.3f} V -> {outs[-1]:.3f} V")
+        print(f"\nSONUC: {n} noktali VTC alindi | Vin: {vin[0]:.3f} -> "
+              f"{vin[-1]:.3f} V | V(out): {outs[0]:.3f} V -> {outs[-1]:.3f} V")
         if vm is not None:
             print(f"Anahtarlama esigi Vm = {vm:.3f} V "
                   f"(VDD/2 = {vdd/2:.2f} V civari beklenir)")
