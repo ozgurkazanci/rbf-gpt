@@ -39,9 +39,13 @@ KNOWN_TOOLS = {
 class CadenceBridge:
     """WSL içindeki Cadence araçlarına komut gönderen köprü."""
 
-    def __init__(self, distro=DEFAULT_DISTRO, workdir=DEFAULT_WORKDIR):
+    def __init__(self, distro=DEFAULT_DISTRO, workdir=DEFAULT_WORKDIR,
+                 env_script=None):
         self.distro = distro
         self.workdir = workdir
+        # Cadence PATH/lisans ayarlarinizi iceren betik (orn. ~/.cadence_env.sh).
+        # None ise: varsa ~/.cadence_env.sh otomatik kaynaklanir.
+        self.env_script = env_script or os.environ.get("CADENCE_ENV_SCRIPT")
         # WSL içinde miyiz, Windows'ta mı? (WSL'de /proc/version 'microsoft' içerir)
         self.inside_wsl = False
         try:
@@ -60,16 +64,21 @@ class CadenceBridge:
         """
         if background:
             command = f"nohup {command} >/dev/null 2>&1 & disown; echo BASLATILDI"
-        shell_cmd = f"cd {shlex.quote(self.workdir)} && {command}"
+        env = (f"source {shlex.quote(self.env_script)}; " if self.env_script
+               else "[ -f ~/.cadence_env.sh ] && source ~/.cadence_env.sh; ")
+        shell_cmd = f"{env}cd {shlex.quote(self.workdir)} && {command}"
 
+        # "-lic": login + interaktif kabuk. Interaktif bayragi onemli: cogu
+        # ~/.bashrc dosyasi "interaktif degilsen cik" korumasiyla baslar ve
+        # Cadence PATH ayarlari o korumanin arkasinda kalir.
         if self.inside_wsl:
-            argv = ["bash", "-lc", shell_cmd]
+            argv = ["bash", "-lic", shell_cmd]
         else:
             if not self.wsl_exe:
                 raise RuntimeError(
                     "wsl.exe bulunamadı — bu komut Windows PowerShell'den ya da "
                     "WSL içinden çalıştırılmalı.")
-            argv = [self.wsl_exe, "-d", self.distro, "--", "bash", "-lc", shell_cmd]
+            argv = [self.wsl_exe, "-d", self.distro, "--", "bash", "-lic", shell_cmd]
 
         proc = subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout, encoding="utf-8",
@@ -89,7 +98,14 @@ class CadenceBridge:
             return report
         for tool in KNOWN_TOOLS:
             rc, out, _ = self.run(f"command -v {tool}", timeout=60)
-            report[tool] = out if rc == 0 and out else "PATH'te yok"
+            path = out.splitlines()[-1] if rc == 0 and out else ""
+            if not path:
+                report[tool] = "PATH'te yok"
+            elif path.startswith(("/usr/sbin", "/usr/bin", "/bin", "/sbin")):
+                # ornek: /usr/sbin/pvs Linux'un LVM komutudur, Cadence PVS degil
+                report[tool] = f"{path}  (DIKKAT: sistem komutu, Cadence degil)"
+            else:
+                report[tool] = path
         return report
 
     # ---------------------------------------------------------------- analog
