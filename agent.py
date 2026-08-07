@@ -55,8 +55,12 @@ TOOL_SCHEMAS = [
     {
         "name": "measure_inverter",
         "description": "CMOS eviriciyi verilen transistor genislikleriyle "
-                       "simule eder, DC gecis egrisinden anahtarlama esigi "
-                       "(vm), cikis seviyeleri (voh/vol) ve kazanci doner.",
+                       "simule eder. Her arka ucta 'vm' (anahtarlama esigi, "
+                       "V) ve 'gain' doner; 'voh'/'vol' yalnizca gercek "
+                       "simulasyon (spectre) ve mock arka uclarinda bulunur, "
+                       "vekil (surrogate) arka ucu donmez. Genislik/boy "
+                       "tasarim kurallarina uymayan cagrilar 'hata' alani "
+                       "ile reddedilir.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -199,11 +203,26 @@ class RuleBasedSizer:
                 hi = ratio
                 ratio /= 2.0
             if not (self.ratio_min <= ratio <= self.RATIO_MAX):
+                # Pes etmeden once SINIRDA bir olcum al: hedef, son olculen
+                # nokta ile sinir arasindaki bantta olabilir.
+                sinir = min(max(ratio, self.ratio_min), self.RATIO_MAX)
+                vm = self._measure(sinir, "sinir")
+                if vm is None:
+                    return None
+                if abs(vm - target_vm) <= tol:
+                    return self.history[-1]
+                if vm < target_vm:
+                    lo = sinir
+                else:
+                    hi = sinir
+                if lo is not None and hi is not None:
+                    break                      # sinir olcumu hedefi kusatti
                 self.durum = "sinirda"
-                print(f"  ! Wp/Wn={ratio:.3g} sinirlarin disinda "
-                      f"({self.ratio_min:.3g}-{self.RATIO_MAX}; W_min="
-                      f"{W_MIN_NM:g} nm kurali dahil); hedef bu "
-                      f"topoloji/kanal boyu ile ulasilamiyor")
+                print(f"  ! sinirda da (Wp/Wn={sinir:.3g}, "
+                      f"{self.ratio_min:.3g}-{self.RATIO_MAX} araligi; "
+                      f"W_min={W_MIN_NM:g} nm kurali dahil) hedef ayni "
+                      f"tarafta kaldi — bu topoloji/kanal boyu ile "
+                      f"ulasilamiyor")
                 break
             vm = self._measure(ratio, "kusatma")
             if vm is None:
@@ -285,8 +304,69 @@ def collect_dataset(tools, n=40, wn_min=W_MIN_NM, wn_max=600.0,
 
 
 # ---------------------------------------------------------------------------
+# TOPLU TARAMA — vekilin asıl gücü: binlerce adayı saniyede elemek
+# ---------------------------------------------------------------------------
+
+def screen_designs(surrogate, target_vm, n=10000, wn_min=W_MIN_NM,
+                   wn_max=600.0, ratio_min=0.3, ratio_max=8.0, l_nm=60.0,
+                   top=5, seed=0):
+    """Tasarım uzayını vekille tarar, hedefe en yakın adayları döndürür.
+
+    Kaba kuvvetle n gerçek simülasyon saatler sürerdi; vekil aynı taramayı
+    tek matris çarpımıyla yapar. Dönen adaylar 'en iyi tahmin' listesidir —
+    son sözü yine gerçek Spectre söylemelidir (--verify).
+    """
+    rng = random.Random(seed)
+    wn_min = max(wn_min, W_MIN_NM)
+    l_kul = max(l_nm, L_MIN_NM)                 # tasarim kurali: L >= 60 nm
+    ciftler = []
+    for _ in range(n):
+        wn = math.exp(rng.uniform(math.log(wn_min), math.log(wn_max)))
+        wp = max(wn * math.exp(rng.uniform(math.log(ratio_min),
+                                           math.log(ratio_max))), W_MIN_NM)
+        ciftler.append((round(wn, 1), round(wp, 1)))
+    # W_MIN kelepcesi ayni (wn, wp) ciftini defalarca uretir; kopyalar hem
+    # top-k'yi ayni tasarimla doldurur hem de --verify'da ozdes Spectre
+    # kosularini bosa harcar — tekillestir.
+    ciftler = list(dict.fromkeys(ciftler))
+    wns = [c[0] for c in ciftler]
+    wps = [c[1] for c in ciftler]
+
+    t0 = time.perf_counter()
+    tahmin = surrogate.predict_many(wns, wps, l_kul)
+    dt = time.perf_counter() - t0
+
+    adaylar = sorted(
+        ({"wn_nm": wns[i], "wp_nm": wps[i], "l_nm": l_kul,
+          "ratio": round(wps[i] / wns[i], 4), "vm": tahmin["vm"][i],
+          **({"gain": tahmin["gain"][i]} if "gain" in tahmin else {})}
+         for i in range(len(wns))),
+        key=lambda a: abs(a["vm"] - target_vm))[:top]
+    return adaylar, dt, len(wns)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
+def _append_history(path, kayitlar, kaynak="spectre"):
+    """Ölçümleri mevcut geçmiş dosyasına ekler (yoksa oluşturur).
+
+    Dosya, surrogate.load_dataset'in okuduğu {"adimlar": [...]} biçimini
+    korur; böylece her gerçek ölçüm ileride vekil eğitimine girebilir.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        if not isinstance(d.get("adimlar"), list):
+            d = {"adimlar": []}
+    except (OSError, json.JSONDecodeError):
+        d = {"adimlar": []}
+    d.setdefault("kaynak", kaynak)
+    d["adimlar"].extend(kayitlar)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(d, f, indent=2, ensure_ascii=False)
+
 
 def _tools(args):
     if args.simulator == "mock":
@@ -346,6 +426,20 @@ def main():
     sp.add_argument("--verify", action="store_true",
                     help="vekille bulunan sonucu gercek Spectre ile dogrula")
 
+    sp = sub.add_parser("screen", parents=[common],
+                        help="vekille binlerce adayi tara, en iyileri sec")
+    sp.add_argument("--target-vm", type=float, default=0.6)
+    sp.add_argument("--n", type=int, default=10000)
+    sp.add_argument("--top", type=int, default=5)
+    sp.add_argument("--wn-min", type=float, default=W_MIN_NM)
+    sp.add_argument("--wn-max", type=float, default=600.0)
+    sp.add_argument("--ratio-min", type=float, default=0.3)
+    sp.add_argument("--ratio-max", type=float, default=8.0)
+    sp.add_argument("--l", type=float, default=60.0)
+    sp.add_argument("--seed", type=int, default=0)
+    sp.add_argument("--verify", action="store_true",
+                    help="en iyi adaylari gercek Spectre ile dogrula")
+
     sp = sub.add_parser("collect", parents=[common],
                         help="tasarim uzayindan veri topla (vekil egitimi icin)")
     sp.add_argument("--n", type=int, default=40)
@@ -372,6 +466,47 @@ def main():
     if args.cmd == "measure":
         res = tools.measure_inverter(args.wn, args.wp, args.l)
         print(json.dumps(res, indent=2, ensure_ascii=False))
+        _append_history(args.history, [res], kaynak=args.simulator)
+        print(f"kayit: {args.history}")
+        return
+
+    if args.cmd == "screen":
+        if not hasattr(tools, "predict_many"):
+            raise SystemExit("screen komutu vekil ister: --simulator "
+                             "surrogate (once surrogate.py train).")
+        adaylar, dt, tekil = screen_designs(
+            tools, args.target_vm, n=args.n, wn_min=args.wn_min,
+            wn_max=args.wn_max, ratio_min=args.ratio_min,
+            ratio_max=args.ratio_max, l_nm=args.l, top=args.top,
+            seed=args.seed)
+        print(f"\n{args.n} aday ({tekil} tekil) {dt:.2f} saniyede tarandi "
+              f"(Spectre ile ~{tekil * 1.3 / 3600:.1f} saat surerdi)")
+        print(f"Hedef Vm = {args.target_vm} V | en iyi {len(adaylar)} aday:")
+        for i, a in enumerate(adaylar, 1):
+            print(f"  {i}. Wn={a['wn_nm']:6.1f} Wp={a['wp_nm']:7.1f} "
+                  f"(oran {a['ratio']:.3f}) | tahmini Vm={a['vm']:.4f} V")
+        gercekler = []
+        if args.verify:
+            print("\nGercek Spectre dogrulamasi:")
+            gercek_arac = CadenceTools(vdd=args.vdd)
+            for i, a in enumerate(adaylar, 1):
+                # Vekil hangi L'de tahmin ettiyse dogrulama da o L'de kosar
+                g = gercek_arac.measure_inverter(a["wn_nm"], a["wp_nm"],
+                                                 a["l_nm"])
+                if g.get("vm") is None:
+                    print(f"  {i}. HATA: {g.get('hata', '?')[:70]}")
+                    continue
+                gercekler.append(g)
+                fark = (g["vm"] - a["vm"]) * 1000
+                print(f"  {i}. gercek Vm={g['vm']:.4f} V | vekil sapmasi "
+                      f"{fark:+.1f} mV | hedefe uzaklik "
+                      f"{abs(g['vm'] - args.target_vm)*1000:.1f} mV")
+        # Gercek olcumler vekilin gelecekteki egitim verisidir — kaydet.
+        if gercekler:
+            _append_history(args.history, gercekler, kaynak="spectre")
+            print(f"\n{len(gercekler)} gercek olcum kaydedildi: "
+                  f"{args.history} (surrogate.py train --data ile "
+                  f"yeniden egitimde kullanilabilir)")
         return
 
     if args.cmd == "collect":
@@ -389,12 +524,7 @@ def main():
     sizer = RuleBasedSizer(tools, wn_nm=args.wn, l_nm=args.l)
     best = sizer.solve(args.target_vm, tol=args.tol, max_iters=args.max_iters)
 
-    with open(args.history, "w", encoding="utf-8") as f:
-        json.dump({"hedef_vm": args.target_vm, "simulator": args.simulator,
-                   "durum": sizer.durum, "adimlar": sizer.history},
-                  f, indent=2, ensure_ascii=False)
-
-    print(f"\n{len(sizer.history)} simulasyon | kayit: {args.history}")
+    print(f"\n{len(sizer.history)} simulasyon")
     if best and best.get("vm") is not None:
         print(f"SONUC: Wp/Wn = {best['ratio']} "
               f"(Wn={best['wn_nm']:g}nm, Wp={best['wp_nm']:g}nm) "
@@ -416,16 +546,26 @@ def main():
             if gercek.get("vm") is None:
                 print(f"  dogrulama basarisiz: {gercek.get('hata')}")
             else:
+                # Gercek olcum da gecmise girer — vekilin egitim verisidir.
+                gercek["not_"] = "dogrulama"
+                sizer.history.append(gercek)
                 fark = gercek["vm"] - best["vm"]
                 print(f"  vekil: {best['vm']:.4f} V | gercek: "
                       f"{gercek['vm']:.4f} V | fark: {fark*1000:+.1f} mV")
                 if abs(gercek["vm"] - args.target_vm) <= args.tol:
                     print("  DOGRULANDI: gercek simulasyon da hedef icinde.")
                 else:
-                    print("  Vekil sapmis — bu noktayi veri kumesine ekleyip"
-                          " modeli yeniden egitmek isabeti artirir.")
+                    print("  Vekil sapmis — bu nokta gecmis dosyasina "
+                          "kaydedildi; surrogate.py train ile yeniden "
+                          "egitim isabeti artirir.")
     else:
         print("SONUC: olcum alinamadi.")
+
+    with open(args.history, "w", encoding="utf-8") as f:
+        json.dump({"hedef_vm": args.target_vm, "simulator": args.simulator,
+                   "durum": sizer.durum, "adimlar": sizer.history},
+                  f, indent=2, ensure_ascii=False)
+    print(f"kayit: {args.history}")
 
 
 if __name__ == "__main__":
