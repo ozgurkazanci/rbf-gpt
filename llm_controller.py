@@ -46,6 +46,10 @@ Fizik (cok onemli):
 Kurallar:
 - Transistor genislikleri en az {W_MIN_NM:g} nm olmalidir (tasarim kurali).
 - Her olcumden sonra Vm'i hedefle karsilastir ve ORANI ona gore ayarla.
+- ARACI GERCEKTEN CAGIR. "Simdi olcecegim" gibi bir sey YAZMA; bunun
+  yerine measure_inverter aracini dogrudan cagir. Hic olcum almadan sonuc
+  YAZMA.
+- Yalnizca Turkce yaz.
 - Hedefe ulastiginda (veya ulasamayacagini anladiginda) arac cagirmayi
   birak ve sonucu tek paragrafta ozetle: bulunan Wn/Wp, oran, olculen
   degerler ve hedefle karsilastirma."""
@@ -141,14 +145,28 @@ class LLMAgent:
         except Exception as exc:                      # modelin hatasi ona doner
             return {"hata": f"{type(exc).__name__}: {exc}"}
 
-    def run(self, task, verbose=True):
+    def run(self, task, verbose=True, max_nudges=2):
         messages = [{"role": "system", "content": SISTEM_TALIMATI},
                     {"role": "user", "content": task}]
+        nudges = 0
         for turn in range(1, self.max_turns + 1):
             msg = self.llm.chat(messages, TOOL_SCHEMAS)
             messages.append(msg)
             calls = msg.get("tool_calls") or []
             if not calls:
+                # Küçük modeller aracı çağıracaklarını YAZIP çağırmayabilir.
+                # Hiç ölçüm almadan bitirmeye kalkarsa bir kez dürt.
+                if self.olcum_sayisi == 0 and nudges < max_nudges:
+                    nudges += 1
+                    if verbose:
+                        print(f"  (tur {turn}: olcum yapilmadi, model "
+                              f"dürtülüyor {nudges}/{max_nudges})")
+                    messages.append({
+                        "role": "user",
+                        "content": "Henuz hic olcum almadin. Metin yazma; "
+                                   "measure_inverter aracini simdi Wn=200, "
+                                   "Wp=400 ile GERCEKTEN cagir."})
+                    continue
                 if verbose:
                     print(f"\n=== MODELIN SONUCU (tur {turn}, "
                           f"{self.olcum_sayisi} olcum) ===")
