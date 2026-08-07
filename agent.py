@@ -285,6 +285,42 @@ def collect_dataset(tools, n=40, wn_min=W_MIN_NM, wn_max=600.0,
 
 
 # ---------------------------------------------------------------------------
+# TOPLU TARAMA — vekilin asıl gücü: binlerce adayı saniyede elemek
+# ---------------------------------------------------------------------------
+
+def screen_designs(surrogate, target_vm, n=10000, wn_min=W_MIN_NM,
+                   wn_max=600.0, ratio_min=0.3, ratio_max=8.0, l_nm=60.0,
+                   top=5, seed=0):
+    """Tasarım uzayını vekille tarar, hedefe en yakın adayları döndürür.
+
+    Kaba kuvvetle n gerçek simülasyon saatler sürerdi; vekil aynı taramayı
+    tek matris çarpımıyla yapar. Dönen adaylar 'en iyi tahmin' listesidir —
+    son sözü yine gerçek Spectre söylemelidir (--verify).
+    """
+    rng = random.Random(seed)
+    wn_min = max(wn_min, W_MIN_NM)
+    wns, wps = [], []
+    for _ in range(n):
+        wn = math.exp(rng.uniform(math.log(wn_min), math.log(wn_max)))
+        wp = max(wn * math.exp(rng.uniform(math.log(ratio_min),
+                                           math.log(ratio_max))), W_MIN_NM)
+        wns.append(round(wn, 1))
+        wps.append(round(wp, 1))
+
+    t0 = time.perf_counter()
+    tahmin = surrogate.predict_many(wns, wps, max(l_nm, L_MIN_NM))
+    dt = time.perf_counter() - t0
+
+    adaylar = sorted(
+        ({"wn_nm": wns[i], "wp_nm": wps[i],
+          "ratio": round(wps[i] / wns[i], 4), "vm": tahmin["vm"][i],
+          **({"gain": tahmin["gain"][i]} if "gain" in tahmin else {})}
+         for i in range(n)),
+        key=lambda a: abs(a["vm"] - target_vm))[:top]
+    return adaylar, dt
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -346,6 +382,20 @@ def main():
     sp.add_argument("--verify", action="store_true",
                     help="vekille bulunan sonucu gercek Spectre ile dogrula")
 
+    sp = sub.add_parser("screen", parents=[common],
+                        help="vekille binlerce adayi tara, en iyileri sec")
+    sp.add_argument("--target-vm", type=float, default=0.6)
+    sp.add_argument("--n", type=int, default=10000)
+    sp.add_argument("--top", type=int, default=5)
+    sp.add_argument("--wn-min", type=float, default=W_MIN_NM)
+    sp.add_argument("--wn-max", type=float, default=600.0)
+    sp.add_argument("--ratio-min", type=float, default=0.3)
+    sp.add_argument("--ratio-max", type=float, default=8.0)
+    sp.add_argument("--l", type=float, default=60.0)
+    sp.add_argument("--seed", type=int, default=0)
+    sp.add_argument("--verify", action="store_true",
+                    help="en iyi adaylari gercek Spectre ile dogrula")
+
     sp = sub.add_parser("collect", parents=[common],
                         help="tasarim uzayindan veri topla (vekil egitimi icin)")
     sp.add_argument("--n", type=int, default=40)
@@ -372,6 +422,36 @@ def main():
     if args.cmd == "measure":
         res = tools.measure_inverter(args.wn, args.wp, args.l)
         print(json.dumps(res, indent=2, ensure_ascii=False))
+        return
+
+    if args.cmd == "screen":
+        if not hasattr(tools, "predict_many"):
+            raise SystemExit("screen komutu vekil ister: --simulator "
+                             "surrogate (once surrogate.py train).")
+        adaylar, dt = screen_designs(
+            tools, args.target_vm, n=args.n, wn_min=args.wn_min,
+            wn_max=args.wn_max, ratio_min=args.ratio_min,
+            ratio_max=args.ratio_max, l_nm=args.l, top=args.top,
+            seed=args.seed)
+        print(f"\n{args.n} aday {dt:.2f} saniyede tarandi "
+              f"(Spectre ile ~{args.n * 1.3 / 3600:.1f} saat surerdi)")
+        print(f"Hedef Vm = {args.target_vm} V | en iyi {len(adaylar)} aday:")
+        for i, a in enumerate(adaylar, 1):
+            print(f"  {i}. Wn={a['wn_nm']:6.1f} Wp={a['wp_nm']:7.1f} "
+                  f"(oran {a['ratio']:.3f}) | tahmini Vm={a['vm']:.4f} V")
+        if args.verify:
+            print("\nGercek Spectre dogrulamasi:")
+            gercek_arac = CadenceTools(vdd=args.vdd)
+            for i, a in enumerate(adaylar, 1):
+                g = gercek_arac.measure_inverter(a["wn_nm"], a["wp_nm"],
+                                                 args.l)
+                if g.get("vm") is None:
+                    print(f"  {i}. HATA: {g.get('hata', '?')[:70]}")
+                    continue
+                fark = (g["vm"] - a["vm"]) * 1000
+                print(f"  {i}. gercek Vm={g['vm']:.4f} V | vekil sapmasi "
+                      f"{fark:+.1f} mV | hedefe uzaklik "
+                      f"{abs(g['vm'] - args.target_vm)*1000:.1f} mV")
         return
 
     if args.cmd == "collect":

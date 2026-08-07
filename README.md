@@ -99,6 +99,24 @@ The surrogate reaches sub-mV accuracy from ~40 samples and answers in ~0.2 ms
 versus seconds per Spectre run, so the agent can screen hundreds of candidate
 sizings and spend real simulations only on the promising ones.
 
+```bash
+# 10.000 adayi ~0.1 saniyede ele, en iyi 5'i gercek Spectre ile dogrula
+python agent.py screen --simulator surrogate --target-vm 0.6 --verify
+```
+
+### LLM kontrolcüsü — modeli takmak
+
+`llm_controller.py`, kurallı kontrolcünün yerine yerel bir dil modelini
+(Ollama) geçirir: görev serbest metindir, model `TOOL_SCHEMAS`'taki araçları
+çağırarak ölçer-değerlendirir-yineler. Bugün Ollama'daki açık bir model,
+yarın kendi eğittiğiniz model — araç katmanı değişmez.
+
+```powershell
+winget install Ollama.Ollama
+ollama pull qwen2.5:7b
+python llm_controller.py --task "Eviriciyi Vm=0.6V olacak sekilde boyutlandir" --simulator surrogate
+```
+
 ## Usage
 
 ```bash

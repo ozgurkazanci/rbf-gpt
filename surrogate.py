@@ -209,6 +209,22 @@ class SurrogateTools:
         res.update({ad: y[j].item() for j, ad in enumerate(self.outputs)})
         return res
 
+    def predict_many(self, wn_nm, wp_nm, l_nm=60):
+        """Binlerce adayı tek matris çarpımında değerlendirir.
+
+        wn_nm/wp_nm: eşit uzunlukta listeler. Dönen sözlükte her çıkış
+        için değer listesi bulunur. Toplu tarama (screen) bunun sayesinde
+        nokta başına döngü kurmadan saniyeler içinde biter.
+        """
+        self.calls += len(wn_nm)
+        x = torch.tensor(
+            [[math.log(a), math.log(b), math.log(l_nm)]
+             for a, b in zip(wn_nm, wp_nm)], dtype=torch.float32)
+        xn = (x - self.norm["xm"]) / self.norm["xs"]
+        with torch.no_grad():
+            y = self.model(xn) * self.norm["ys"] + self.norm["ym"]
+        return {ad: y[:, j].tolist() for j, ad in enumerate(self.outputs)}
+
 
 # ---------------------------------------------------------------------------
 # CLI
