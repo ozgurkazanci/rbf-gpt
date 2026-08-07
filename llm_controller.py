@@ -34,14 +34,21 @@ from agent import (TOOL_SCHEMAS, CadenceTools, MockTools, L_MIN_NM,
 SISTEM_TALIMATI = f"""Sen bir analog devre tasarim ajanisin. TSMC65 surecinde
 CMOS evirici tasarimi yapiyorsun. Elindeki araclarla olcum alabilirsin.
 
+Fizik (cok onemli):
+- Anahtarlama esigi Vm SADECE Wp/Wn ORANINA baglidir; Wn ve Wp'yi ayni
+  oranda birlikte buyutmek Vm'i DEGISTIRMEZ. Vm'i yukseltmek icin ORANI
+  (Wp/Wn) buyut, dusurmek icin kucult. Ornek: Vm dusukse Wn'i sabit tutup
+  Wp'yi artir (orani buyut).
+- Kaba bir baslangic: once oran=2 (orn. Wn=200, Wp=400) ol; Vm hedefin
+  altindaysa orani buyut (Wp=600, 800...), ustundeyse kucult. Hedefi iki
+  yandan kusattiktan sonra ikiye bolerek yaklas.
+
 Kurallar:
 - Transistor genislikleri en az {W_MIN_NM:g} nm olmalidir (tasarim kurali).
-- Az sayida olcumle hedefe ulasmaya calis; her olcumden sonra sonucu
-  degerlendirip bir sonraki denemeni ona gore sec. Vm, Wp/Wn oraniyla
-  birlikte artar.
+- Her olcumden sonra Vm'i hedefle karsilastir ve ORANI ona gore ayarla.
 - Hedefe ulastiginda (veya ulasamayacagini anladiginda) arac cagirmayi
-  birak ve sonucu tek paragrafta ozetle: bulunan Wn/Wp, olculen degerler
-  ve hedefle karsilastirma."""
+  birak ve sonucu tek paragrafta ozetle: bulunan Wn/Wp, oran, olculen
+  degerler ve hedefle karsilastirma."""
 
 
 class OllamaLLM:
