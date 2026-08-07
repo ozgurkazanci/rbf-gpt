@@ -117,6 +117,28 @@ ollama pull qwen2.5:7b
 python llm_controller.py --task "Eviriciyi Vm=0.6V olacak sekilde boyutlandir" --simulator surrogate
 ```
 
+### Kendi modeliniz — uzman gösteriminden ince ayar
+
+`finetune.py`, kurallı uzman kontrolcüyü öğretmen olarak kullanıp eğitim
+verisi üretir (genel modelin bilmediği "oran Vm'i belirler" fiziğini öğretir).
+İki yol:
+
+```powershell
+# Eğitimsiz: uzman stratejisini sistem-promptu olarak gömen isimli model
+python finetune.py modelfile --out Modelfile
+ollama create rbf-designer -f Modelfile
+python llm_controller.py --task "..." --llm rbf-designer
+
+# Gerçek LoRA: veri üret, Colab'da eğit (finetune_colab.ipynb), GGUF'u Ollama'ya al
+python finetune.py dataset --n-tasks 300 --out sft.jsonl
+```
+
+`finetune_colab.ipynb`'yi Colab'da açın (T4 GPU), `sft.jsonl`'i yükleyin;
+notebook Qwen2.5-7B'yi LoRA ile ince ayar edip Ollama'ya alınabilen bir GGUF
+üretir. Karşılaştırma: ham qwen2.5:7b oranı 2.0'da sabit tutup Vm≈0.585'te
+takılırken, uzman-gösterimli `rbf-designer` oranı 2.0→2.4→2.5 gezerek hedefe
+ulaşıyor.
+
 ## Usage
 
 ```bash
