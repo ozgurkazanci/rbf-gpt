@@ -50,9 +50,13 @@ Kurallar:
   yerine measure_inverter aracini dogrudan cagir. Hic olcum almadan sonuc
   YAZMA.
 - Yalnizca Turkce yaz.
-- Hedefe ulastiginda (veya ulasamayacagini anladiginda) arac cagirmayi
-  birak ve sonucu tek paragrafta ozetle: bulunan Wn/Wp, oran, olculen
-  degerler ve hedefle karsilastirma."""
+- HEDEFE ULASMAK: |Vm - hedef| <= 0.005 V olana kadar DURMA, olcmeye devam
+  et. 0.608 gibi hedefin 0.005 V otesindeki bir deger YETERLI DEGILDIR;
+  orani biraz kucultup (veya buyutup) tekrar olc. Toleransa girmeden
+  "hedefe ulasildi" DEME.
+- Yalnizca (a) toleransa girince ya da (b) oran sinira dayanip hedef hala
+  uzaksa (ulasilamaz) arac cagirmayi birak; sonucu tek paragrafta ozetle:
+  Wn/Wp, oran, olculen Vm ve hedefe uzaklik."""
 
 
 class OllamaLLM:
