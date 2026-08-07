@@ -23,11 +23,13 @@ Kullanım:
 """
 
 import argparse
+import http.client
 import json
 import urllib.error
 import urllib.request
 
-from agent import (TOOL_SCHEMAS, CadenceTools, MockTools, W_MIN_NM)
+from agent import (TOOL_SCHEMAS, CadenceTools, MockTools, L_MIN_NM,
+                   W_MIN_NM)
 
 SISTEM_TALIMATI = f"""Sen bir analog devre tasarim ajanisin. TSMC65 surecinde
 CMOS evirici tasarimi yapiyorsun. Elindeki araclarla olcum alabilirsin.
@@ -63,20 +65,45 @@ class OllamaLLM:
             headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=300) as r:
-                return json.loads(r.read())["message"]
-        except urllib.error.URLError as exc:
-            raise SystemExit(
-                f"Ollama'ya baglanilamadi ({self.host}): {exc}\n"
+                govde = r.read()
+        except urllib.error.HTTPError as exc:
+            # Ollama'nin JSON hata govdesi asil teshisi tasir (orn. model
+            # cekilmemis) — yutma, kullaniciya goster.
+            try:
+                detay = exc.read().decode("utf-8", "replace")[:300]
+            except OSError:
+                detay = ""
+            raise RuntimeError(
+                f"Ollama HTTP {exc.code}: {detay or exc.reason}\n"
+                f"Model cekilmemis olabilir: ollama pull {self.model}")
+        except (OSError, http.client.HTTPException) as exc:
+            # URLError, TimeoutError, ConnectionReset, IncompleteRead...
+            # baglanti VE okuma asamasi hatalarinin tamami burada.
+            raise RuntimeError(
+                f"Ollama'ya ulasilamadi ({self.host}): {exc}\n"
                 "Kurulum: winget install Ollama.Ollama\n"
-                "Model:   ollama pull qwen2.5:7b\n"
-                "Sunucu genellikle kurulumla birlikte kendiliginden calisir.")
+                f"Model:   ollama pull {self.model}")
+        try:
+            yanit = json.loads(govde)
+        except json.JSONDecodeError:
+            raise RuntimeError(f"Ollama gecersiz JSON dondurdu: "
+                               f"{govde[:200]!r}")
+        msg = yanit.get("message")
+        if not isinstance(msg, dict):
+            raise RuntimeError(f"Beklenmedik Ollama yaniti: "
+                               f"{str(yanit)[:200]}")
+        return msg
 
 
 class LLMAgent:
     """Araç-çağrı döngüsü: model karar verir, araçlar ölçer."""
 
-    def __init__(self, llm, tools, max_turns=16):
+    def __init__(self, llm, tools, max_turns=16, max_measurements=24):
         self.llm, self.tools, self.max_turns = llm, tools, max_turns
+        # max_turns tur sayisini sinirlar ama TEK turda 50 arac cagrisi
+        # gelebilir; gercek Spectre'da her biri dakikalara mal olur. Olcum
+        # butcesi bunu kesin olarak sinirlar.
+        self.max_measurements = max_measurements
         self.olcum_sayisi = 0
 
     def _call_tool(self, name, args):
@@ -84,10 +111,25 @@ class LLMAgent:
             if name == "pdk_info":
                 return self.tools.pdk_info()
             if name == "measure_inverter":
+                if self.olcum_sayisi >= self.max_measurements:
+                    return {"hata": f"olcum butcesi doldu "
+                                    f"({self.max_measurements} olcum); yeni "
+                                    f"olcum alma, eldeki verilerle sonuca "
+                                    f"git ve ozetle"}
+                wn = float(args["wn_nm"])
+                wp = float(args["wp_nm"])
+                l = float(args.get("l_nm", 60))
+                # Tasarim kurali her arka ucta zorlanir: vekil/mock aksi
+                # halde uretilebilir olmayan boyutlara makul degerler
+                # dondurup modeli yanlis odullendirirdi.
+                if wn < W_MIN_NM or wp < W_MIN_NM or l < L_MIN_NM:
+                    return {"hata": f"tasarim kurali ihlali: genislikler >= "
+                                    f"{W_MIN_NM:g} nm, kanal boyu >= "
+                                    f"{L_MIN_NM:g} nm olmali "
+                                    f"(istenen: wn={wn:g}, wp={wp:g}, "
+                                    f"l={l:g})"}
                 self.olcum_sayisi += 1
-                return self.tools.measure_inverter(
-                    float(args["wn_nm"]), float(args["wp_nm"]),
-                    float(args.get("l_nm", 60)))
+                return self.tools.measure_inverter(wn, wp, l)
             return {"hata": f"bilinmeyen arac: {name}"}
         except Exception as exc:                      # modelin hatasi ona doner
             return {"hata": f"{type(exc).__name__}: {exc}"}
@@ -148,15 +190,23 @@ def main():
                    help="Ollama model adi (qwen2.5:7b, llama3.1:8b ...)")
     p.add_argument("--host", default="http://localhost:11434")
     p.add_argument("--max-turns", type=int, default=16)
+    p.add_argument("--max-measurements", type=int, default=24,
+                   help="toplam olcum butcesi (gercek Spectre'da maliyeti "
+                        "sinirlar)")
     p.add_argument("--vdd", type=float, default=1.2)
     args = p.parse_args()
 
     tools = make_tools(args.simulator, args.model, args.vdd)
-    print(f"Simulator: {args.simulator} | LLM: {args.llm}")
+    print(f"Simulator: {args.simulator} | LLM: {args.llm} | "
+          f"olcum butcesi: {args.max_measurements}")
     print(f"Gorev: {args.task}\n")
     agent = LLMAgent(OllamaLLM(args.llm, args.host), tools,
-                     max_turns=args.max_turns)
-    agent.run(args.task)
+                     max_turns=args.max_turns,
+                     max_measurements=args.max_measurements)
+    try:
+        agent.run(args.task)
+    except RuntimeError as exc:
+        raise SystemExit(f"\n{exc}")
 
 
 if __name__ == "__main__":

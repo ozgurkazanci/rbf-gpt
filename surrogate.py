@@ -176,7 +176,10 @@ def save(path, model, norm, cfg, outputs=CIKISLAR):
 
 
 def load(path):
-    d = torch.load(path, weights_only=False)
+    # weights_only=True sart: checkpoint yalnizca tensor/dict/list icerir ve
+    # weights_only=False, kurcalanan bir .pt dosyasinin yukleme aninda
+    # keyfi kod calistirmasina izin verirdi (pickle).
+    d = torch.load(path, weights_only=True)
     c = d["cfg"]
     model = TurboRBF(c["in_dim"], c["centers"], c["out_dim"], rank=c["rank"],
                      num_groups=c["groups"], active_groups=c["active"])
