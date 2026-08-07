@@ -35,6 +35,7 @@ Kullanım:
 import argparse
 import json
 import math
+import random
 import time
 
 from cadence_bridge.bridge import CadenceBridge
@@ -237,6 +238,38 @@ class RuleBasedSizer:
 
 
 # ---------------------------------------------------------------------------
+# VERİ TOPLAMA — vekil modelin (surrogate) eğitim kümesi
+# ---------------------------------------------------------------------------
+
+def collect_dataset(tools, n=40, wn_min=100.0, wn_max=600.0,
+                    ratio_min=0.3, ratio_max=8.0, l_nm=60.0, seed=0):
+    """Tasarım uzayından log-düzgün örnekler alıp gerçek simülasyon koşar.
+
+    Genişlikler çarpımsal büyüklükler olduğu için örnekleme log ölçekte
+    yapılır: 100-600 nm aralığında düzgün örnekleme küçük genişlikleri
+    yeterince temsil etmezdi.
+    """
+    rng = random.Random(seed)
+    veri = []
+    print(f"{n} nokta toplanacak (Wn {wn_min:g}-{wn_max:g} nm, "
+          f"Wp/Wn {ratio_min:g}-{ratio_max:g})")
+    for i in range(n):
+        wn = math.exp(rng.uniform(math.log(wn_min), math.log(wn_max)))
+        ratio = math.exp(rng.uniform(math.log(ratio_min), math.log(ratio_max)))
+        res = tools.measure_inverter(round(wn, 1), round(wn * ratio, 1), l_nm)
+        res["ratio"] = round(ratio, 4)
+        veri.append(res)
+        vm = res.get("vm")
+        print(f"  {i+1:3d}/{n} | Wn={res['wn_nm']:7.1f} Wp={res['wp_nm']:8.1f} | "
+              + (f"Vm={vm:.4f} V" if vm is not None
+                 else f"HATA: {res.get('hata', '?')[:60]}")
+              + f" | {res.get('sure_s', 0)}s")
+    basarili = [v for v in veri if v.get("vm") is not None]
+    print(f"\n{len(basarili)}/{n} nokta basarili")
+    return veri
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -244,6 +277,14 @@ def _tools(args):
     if args.simulator == "mock":
         print("Simulator: MOCK (analitik model — Cadence calistirilmiyor)")
         return MockTools(vdd=args.vdd)
+    if args.simulator == "surrogate":
+        from surrogate import SurrogateTools      # torch sadece burada gerekir
+        t = SurrogateTools(args.model)
+        print(f"Simulator: VEKIL TurboRBF ({args.model}) — Spectre "
+              f"calistirilmiyor")
+        for k, v in t.pdk_info().items():
+            print(f"  {k}: {v}")
+        return t
     print("Simulator: Spectre (gercek PDK)")
     t = CadenceTools(vdd=args.vdd)
     try:
@@ -268,9 +309,11 @@ def main():
     # SUPPRESS sart: varsayilan deger yazilsaydi, alt komut ayristiricisi
     # komuttan ONCE verilen degeri ezerdi.
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--simulator", choices=["spectre", "mock"],
+    common.add_argument("--simulator", choices=["spectre", "mock", "surrogate"],
                         default=argparse.SUPPRESS)
     common.add_argument("--vdd", type=float, default=argparse.SUPPRESS)
+    common.add_argument("--model", default=argparse.SUPPRESS,
+                        help="vekil model dosyasi (--simulator surrogate)")
     common.add_argument("--history", default=argparse.SUPPRESS,
                         help="adim kayitlarinin yazilacagi JSON dosyasi")
 
@@ -285,6 +328,19 @@ def main():
     sp.add_argument("--max-iters", type=int, default=16)
     sp.add_argument("--wn", type=float, default=200.0, help="NMOS W (nm)")
     sp.add_argument("--l", type=float, default=60.0, help="kanal boyu (nm)")
+    sp.add_argument("--verify", action="store_true",
+                    help="vekille bulunan sonucu gercek Spectre ile dogrula")
+
+    sp = sub.add_parser("collect", parents=[common],
+                        help="tasarim uzayindan veri topla (vekil egitimi icin)")
+    sp.add_argument("--n", type=int, default=40)
+    sp.add_argument("--wn-min", type=float, default=100.0)
+    sp.add_argument("--wn-max", type=float, default=600.0)
+    sp.add_argument("--ratio-min", type=float, default=0.3)
+    sp.add_argument("--ratio-max", type=float, default=8.0)
+    sp.add_argument("--l", type=float, default=60.0)
+    sp.add_argument("--seed", type=int, default=0)
+    sp.add_argument("--out", default="dataset.json")
 
     sp = sub.add_parser("measure", parents=[common], help="tek bir olcum")
     sp.add_argument("--wn", type=float, default=200.0)
@@ -293,6 +349,7 @@ def main():
 
     args = p.parse_args()
     for key, default in (("simulator", "spectre"), ("vdd", 1.2),
+                         ("model", "surrogate.pt"),
                          ("history", "agent_history.json")):
         setattr(args, key, getattr(args, key, default))
     tools = _tools(args)
@@ -300,6 +357,18 @@ def main():
     if args.cmd == "measure":
         res = tools.measure_inverter(args.wn, args.wp, args.l)
         print(json.dumps(res, indent=2, ensure_ascii=False))
+        return
+
+    if args.cmd == "collect":
+        veri = collect_dataset(tools, n=args.n, wn_min=args.wn_min,
+                               wn_max=args.wn_max, ratio_min=args.ratio_min,
+                               ratio_max=args.ratio_max, l_nm=args.l,
+                               seed=args.seed)
+        with open(args.out, "w", encoding="utf-8") as f:
+            json.dump({"kaynak": args.simulator, "adimlar": veri}, f,
+                      indent=2, ensure_ascii=False)
+        print(f"Kayit: {args.out}")
+        print(f"Sonraki adim: python surrogate.py train --data {args.out}")
         return
 
     sizer = RuleBasedSizer(tools, wn_nm=args.wn, l_nm=args.l)
@@ -323,6 +392,23 @@ def main():
                   f"sonuc yukarida.")
         else:
             print("Hedefe tam ulasilamadi — --max-iters artirilabilir.")
+
+        # Hibrit akis: vekil hizli tarar, gercek simulator son sozu soyler.
+        if getattr(args, "verify", False) and args.simulator == "surrogate":
+            print("\nVekilin buldugu nokta gercek Spectre ile dogrulaniyor...")
+            gercek = CadenceTools(vdd=args.vdd).measure_inverter(
+                best["wn_nm"], best["wp_nm"], best.get("l_nm", args.l))
+            if gercek.get("vm") is None:
+                print(f"  dogrulama basarisiz: {gercek.get('hata')}")
+            else:
+                fark = gercek["vm"] - best["vm"]
+                print(f"  vekil: {best['vm']:.4f} V | gercek: "
+                      f"{gercek['vm']:.4f} V | fark: {fark*1000:+.1f} mV")
+                if abs(gercek["vm"] - args.target_vm) <= args.tol:
+                    print("  DOGRULANDI: gercek simulasyon da hedef icinde.")
+                else:
+                    print("  Vekil sapmis — bu noktayi veri kumesine ekleyip"
+                          " modeli yeniden egitmek isabeti artirir.")
     else:
         print("SONUC: olcum alinamadi.")
 
