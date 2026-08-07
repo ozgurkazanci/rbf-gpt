@@ -45,6 +45,12 @@ from cadence_bridge.psf import vtc_metrics
 # ARAÇ TANIMLARI — bir LLM'e verilecek şema budur (henüz model bağlı değil).
 # ---------------------------------------------------------------------------
 
+# TSMC65 cekirdek cihazlari icin asgari cizim genisligi. Bunun altindaki
+# W degerlerinde Spectre "Error found during initial setup" verir; ajan
+# tasarim kuralini bilmezse simulasyonlarin bir kismini bosa harcar.
+W_MIN_NM = 120.0
+L_MIN_NM = 60.0
+
 TOOL_SCHEMAS = [
     {
         "name": "measure_inverter",
@@ -153,7 +159,10 @@ class RuleBasedSizer:
 
     def __init__(self, tools, wn_nm=200.0, l_nm=60.0):
         self.tools = tools
-        self.wn, self.l = wn_nm, l_nm
+        self.wn = max(wn_nm, W_MIN_NM)      # tasarim kurali
+        self.l = max(l_nm, L_MIN_NM)
+        # Oranin alt siniri, Wp'nin de kurala uymasini garanti eder.
+        self.ratio_min = max(self.RATIO_MIN, W_MIN_NM / self.wn)
         self.history = []
         self.durum = "calisiyor"
 
@@ -189,10 +198,11 @@ class RuleBasedSizer:
             else:
                 hi = ratio
                 ratio /= 2.0
-            if not (self.RATIO_MIN <= ratio <= self.RATIO_MAX):
+            if not (self.ratio_min <= ratio <= self.RATIO_MAX):
                 self.durum = "sinirda"
-                print(f"  ! Wp/Wn={ratio:.3g} fiziksel sinirlarin disinda "
-                      f"({self.RATIO_MIN}-{self.RATIO_MAX}); hedef bu "
+                print(f"  ! Wp/Wn={ratio:.3g} sinirlarin disinda "
+                      f"({self.ratio_min:.3g}-{self.RATIO_MAX}; W_min="
+                      f"{W_MIN_NM:g} nm kurali dahil); hedef bu "
                       f"topoloji/kanal boyu ile ulasilamiyor")
                 break
             vm = self._measure(ratio, "kusatma")
@@ -241,7 +251,7 @@ class RuleBasedSizer:
 # VERİ TOPLAMA — vekil modelin (surrogate) eğitim kümesi
 # ---------------------------------------------------------------------------
 
-def collect_dataset(tools, n=40, wn_min=100.0, wn_max=600.0,
+def collect_dataset(tools, n=40, wn_min=W_MIN_NM, wn_max=600.0,
                     ratio_min=0.3, ratio_max=8.0, l_nm=60.0, seed=0):
     """Tasarım uzayından log-düzgün örnekler alıp gerçek simülasyon koşar.
 
@@ -251,12 +261,17 @@ def collect_dataset(tools, n=40, wn_min=100.0, wn_max=600.0,
     """
     rng = random.Random(seed)
     veri = []
+    wn_min = max(wn_min, W_MIN_NM)          # tasarim kurali: W >= 120 nm
+    l_nm = max(l_nm, L_MIN_NM)
     print(f"{n} nokta toplanacak (Wn {wn_min:g}-{wn_max:g} nm, "
-          f"Wp/Wn {ratio_min:g}-{ratio_max:g})")
+          f"Wp/Wn {ratio_min:g}-{ratio_max:g}, W_min={W_MIN_NM:g} nm)")
     for i in range(n):
         wn = math.exp(rng.uniform(math.log(wn_min), math.log(wn_max)))
         ratio = math.exp(rng.uniform(math.log(ratio_min), math.log(ratio_max)))
-        res = tools.measure_inverter(round(wn, 1), round(wn * ratio, 1), l_nm)
+        # Wp da kurala uymali; ihlal eden ornekler simulasyonu bosa harcar.
+        wp = max(wn * ratio, W_MIN_NM)
+        ratio = wp / wn
+        res = tools.measure_inverter(round(wn, 1), round(wp, 1), l_nm)
         res["ratio"] = round(ratio, 4)
         veri.append(res)
         vm = res.get("vm")
