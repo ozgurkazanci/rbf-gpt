@@ -60,6 +60,45 @@ python mini_gpt_rbf.py --attention rbf --rbf-impl naive # original slow path
 python mini_gpt_rbf.py --attention rbf --mlp turbo-rbf  # fully-RBF model
 ```
 
+### AMD Radeon (DirectML) ile çalıştırma — Windows
+
+Entegre/harici tüm DX12 Radeon'larda (ör. Radeon 780M) çalışır. **Windows
+Python'ında** (WSL'de değil, PowerShell'de) kurun:
+
+```powershell
+py -3.11 -m venv rbfenv
+rbfenv\Scripts\activate
+pip install torch-directml
+git clone https://github.com/ozgurkazanci/rbf-gpt
+cd rbf-gpt
+python mini_gpt_rbf.py --attention rbf --device dml --iters 1000
+```
+
+`torch-directml`, uyumlu PyTorch sürümünü kendisi kurar (Python 3.11 veya
+altı gerekir). Fused attention DML'de desteklenmezse `--rbf-impl naive`
+ekleyin — aynı matematik, temel işlemlerle.
+
+## Cadence agent + TurboRBF simulator surrogate
+
+`cadence_bridge/` drives Cadence tools inside WSL from Windows; `agent.py`
+closes a design loop on top of it (size an inverter to a target switching
+threshold); `surrogate.py` trains TurboRBF on the loop's own measurements so
+later searches skip Spectre entirely.
+
+```bash
+python -m cadence_bridge.demo check        # tool inventory
+python -m cadence_bridge.demo invsim       # inverter VTC on the real PDK
+python agent.py size-inverter --target-vm 0.6          # real Spectre loop
+python agent.py collect --n 40 --out dataset.json      # sample design space
+python surrogate.py train --data dataset.json          # fit TurboRBF
+python agent.py size-inverter --simulator surrogate \
+    --target-vm 0.6 --verify                           # surrogate + check
+```
+
+The surrogate reaches sub-mV accuracy from ~40 samples and answers in ~0.2 ms
+versus seconds per Spectre run, so the agent can screen hundreds of candidate
+sizings and spend real simulations only on the promising ones.
+
 ## Usage
 
 ```bash
