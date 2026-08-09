@@ -496,6 +496,55 @@ module sayici_tb;
 endmodule
 """
 
+    # TSMC65 LP stdcell kütüphanesi (stdcells raporunun bulduğu konum)
+    STCLIB_ROOT = f"{PDK_ROOT}/65/CMOS/LP/stclib"
+
+    def synth_sim(self):
+        """Genus ile gerçek TSMC65 hücrelerine sentez — dijital 2. halka.
+
+        NLDM Liberty arşivini (bir kere) workdir'e açar, sayıcı RTL'ini
+        legacy-UI Genus betiğiyle sentezler, alan/kapı raporlarını ve
+        netlist başını döker. PDK dizinine yazmaz; her şey workdir'de.
+        """
+        d = f"{self.workdir}/bridge_test/synth"
+        lib_dir = f"{self.workdir}/bridge_test/stdlib"
+        script = (
+            f"NLDM=$(find {self.STCLIB_ROOT} -name '*nldm.tar.gz' | head -1); "
+            f'[ -n "$NLDM" ] || {{ echo NLDM_YOK; exit 1; }}; '
+            f"mkdir -p {lib_dir} {d}; "
+            # tipik (tc) kose .lib'i; yoksa arsivi ac ve tekrar ara
+            f"LIB=$(find {lib_dir} -name '*tc.lib' | head -1); "
+            f'if [ -z "$LIB" ]; then tar xzf "$NLDM" -C {lib_dir}; '
+            f"LIB=$(find {lib_dir} -name '*tc.lib' | head -1); fi; "
+            f'[ -n "$LIB" ] || LIB=$(find {lib_dir} -name "*.lib" | head -1); '
+            f'[ -n "$LIB" ] || {{ echo LIB_YOK; exit 1; }}; '
+            f'echo "KULLANILAN_LIB: $LIB"; '
+            f"command -v genus >/dev/null || {{ echo GENUS_YOK; exit 1; }}; "
+            f"cd {d} && "
+            f"cat > sayici.v <<'RTL_EOF'\n{self.RTL_DESIGN}RTL_EOF\n"
+            # TCL_EOF tirnak SIZ: $LIB kabukta genislesin
+            f"cat > synth.tcl <<TCL_EOF\n"
+            f"set_attribute library [list $LIB]\n"
+            f"read_hdl sayici.v\n"
+            f"elaborate sayici\n"
+            f"synthesize -to_mapped -effort medium\n"
+            f"report area > area.rpt\n"
+            f"report gates > gates.rpt\n"
+            f"report timing > timing.rpt\n"
+            f"write_hdl > sayici_syn.v\n"
+            f"puts SENTEZ_TAMAM\n"
+            f"quit\n"
+            f"TCL_EOF\n"
+            f"genus -no_gui -files synth.tcl -log genus.log "
+            f"> genus_stdout.log 2>&1; echo GENUS_RC=$?; "
+            f"grep -m1 SENTEZ_TAMAM genus_stdout.log genus.log 2>/dev/null; "
+            f"echo ---AREA---; head -15 area.rpt 2>/dev/null; "
+            f"echo ---GATES---; tail -12 gates.rpt 2>/dev/null; "
+            f"echo ---NETLIST---; head -20 sayici_syn.v 2>/dev/null; "
+            f"echo ---HATALAR---; grep -iE '(^|\\s)error' genus.log "
+            f"genus_stdout.log 2>/dev/null | head -8")
+        return self.run(script, timeout=1800)
+
     def rtl_sim(self):
         """Xcelium (xrun) ile uçtan uca RTL simülasyonu — dijital ilk tur.
 

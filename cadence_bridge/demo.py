@@ -36,6 +36,7 @@ def main():
     sub.add_parser("invsim", help="TSMC65 modelleriyle evirici VTC simulasyonu")
     sub.add_parser("rtlsim", help="Xcelium (xrun) ile RTL simulasyonu — sayici + TB")
     sub.add_parser("stdcells", help="dijital PDK envanteri: stdcell zipleri + acilmis dosyalar")
+    sub.add_parser("synthsim", help="Genus ile sayiciyi gercek TSMC65 hucrelerine sentezle")
     sub.add_parser("virtuoso", help="Virtuoso GUI'yi baslat (virtuoso -64 &)")
     for name, hlp in [("skill", "SKILL betigi (.il) batch calistir"),
                       ("ocean", "OCEAN betigi (.ocn) batch calistir"),
@@ -82,6 +83,25 @@ def main():
             print(f"===== {key} =====")
             print(val)
             print()
+        return
+
+    if args.cmd == "synthsim":
+        rc, out, err = br.synth_sim()
+        print(out)
+        if err:
+            print("--- stderr ---")
+            print(err)
+        if "NLDM_YOK" in out:
+            print("\nSONUC: stclib altinda nldm arsivi bulunamadi — "
+                  "'stdcells' raporuyla bakalim.")
+        elif "GENUS_YOK" in out:
+            print("\nSONUC: genus PATH'te yok — 'check' ciktisina bakalim.")
+        elif "SENTEZ_TAMAM" in out:
+            print("\nGENUS SENTEZI DOGRULANDI: RTL, gercek TSMC65 stdcell "
+                  "kutuphanesine sentezlendi (alan/kapi raporu yukarida).")
+        else:
+            print("\nSONUC: sentez tamamlanamadi — ---HATALAR--- bolumunu "
+                  "birlikte degerlendirelim.")
         return
 
     if args.cmd == "rtlsim":
