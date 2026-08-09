@@ -34,6 +34,7 @@ def main():
     sub.add_parser("firstsim", help="uctan uca ilk Spectre simulasyonu (RC devresi)")
     sub.add_parser("pdk", help="PDK envanteri: kitler, spectre modelleri, koseler")
     sub.add_parser("invsim", help="TSMC65 modelleriyle evirici VTC simulasyonu")
+    sub.add_parser("rtlsim", help="Xcelium (xrun) ile RTL simulasyonu — sayici + TB")
     sub.add_parser("virtuoso", help="Virtuoso GUI'yi baslat (virtuoso -64 &)")
     for name, hlp in [("skill", "SKILL betigi (.il) batch calistir"),
                       ("ocean", "OCEAN betigi (.ocn) batch calistir"),
@@ -73,6 +74,26 @@ def main():
             print(f"===== {key} =====")
             print(val)
             print()
+        return
+
+    if args.cmd == "rtlsim":
+        rc, out, err = br.rtl_sim()
+        print(out)
+        if err:
+            print("--- stderr ---")
+            print(err)
+        if "XRUN_YOK" in out:
+            print("\nSONUC: xrun PATH'te bulunamadi — 'python -m "
+                  "cadence_bridge.demo check' ile bakalim.")
+        elif "TB_SONUC: PASS" in out:
+            print("\nDIJITAL TUR DOGRULANDI: RTL yaz -> xrun ile simule et "
+                  "-> sonucu oku dongusu calisiyor.")
+        elif "TB_SONUC: FAIL" in out:
+            print("\nDIKKAT: testbench hata yakaladi — cikti ile birlikte "
+                  "bakalim.")
+        else:
+            print("\nSONUC: TB_SONUC satiri gorunmedi — cikti ile birlikte "
+                  "bakalim (derleme hatasi olabilir).")
         return
 
     if args.cmd == "invsim":
