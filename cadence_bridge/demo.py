@@ -35,6 +35,7 @@ def main():
     sub.add_parser("pdk", help="PDK envanteri: kitler, spectre modelleri, koseler")
     sub.add_parser("invsim", help="TSMC65 modelleriyle evirici VTC simulasyonu")
     sub.add_parser("rtlsim", help="Xcelium (xrun) ile RTL simulasyonu — sayici + TB")
+    sub.add_parser("stdcells", help="dijital PDK envanteri: stdcell zipleri + acilmis dosyalar")
     sub.add_parser("virtuoso", help="Virtuoso GUI'yi baslat (virtuoso -64 &)")
     for name, hlp in [("skill", "SKILL betigi (.il) batch calistir"),
                       ("ocean", "OCEAN betigi (.ocn) batch calistir"),
@@ -71,6 +72,13 @@ def main():
 
     if args.cmd == "pdk":
         for key, val in br.pdk_report().items():
+            print(f"===== {key} =====")
+            print(val)
+            print()
+        return
+
+    if args.cmd == "stdcells":
+        for key, val in br.stdcell_report().items():
             print(f"===== {key} =====")
             print(val)
             print()

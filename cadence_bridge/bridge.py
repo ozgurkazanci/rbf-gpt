@@ -409,6 +409,37 @@ saveOptions options save=allpub
             info[f"deneme_{att['nmos']}"] = "basarisiz (log satirlari ciktida)"
         return info, last[0], last[1], last[2]
 
+    def stdcell_report(self, root=f"{PDK_ROOT}/65"):
+        """Dijital PDK envanteri: TSMC teslimat ZIP'leri ve açılmış dosyalar.
+
+        PDK/65'teki stdcell kütüphaneleri T-N65-CL-*.zip paketlerinde;
+        yanlarındaki .desc dosyaları içeriği tanımlar. Bu rapor, hangi
+        pakette Liberty/.lef/Verilog olduğunu ve halihazırda açılmış bir
+        kütüphane bulunup bulunmadığını tek seferde gösterir. (Kullanıcıya
+        tırnaklı sh komutları yazdırmamak için sabit betik burada yaşar.)
+        """
+        q = shlex.quote(root)
+        probes = [
+            ("paket_aciklamalari",
+             f'cd {q}/CMOS/util 2>/dev/null && for f in *.desc; do '
+             f'echo "===== $f"; head -6 "$f"; done | head -160'),
+            ("acilmis_dosyalar",
+             f'find {q} -maxdepth 7 \\( -iname "*.lib" -o -iname "*.lef" '
+             f'-o -iname "tcbn*" \\) 2>/dev/null | grep -v "\\.zip" | head -25'),
+            ("iolib_icerigi",
+             f'ls {q}/CMOS/LP/IO2.5V/iolib 2>/dev/null | head -15'),
+            ("lp_pdk_zipleri",
+             f'ls {q}/CMOS/LP/pdk/*.zip 2>/dev/null | head -15'),
+        ]
+        report = {}
+        for key, cmd in probes:
+            try:
+                _, out, err = self.run(cmd, timeout=180)
+                report[key] = out or err or "(bos)"
+            except Exception as exc:
+                report[key] = f"HATA: {exc}"
+        return report
+
     # ---------------------------------------------------------------- dijital
     # RTL doğrulama tasarımı: 8-bit sayıcı + kendini-denetleyen testbench.
     # PDK/stdcell gerektirmez — saf RTL simülasyonu (xrun) yeterlidir.
