@@ -410,6 +410,76 @@ saveOptions options save=allpub
         return info, last[0], last[1], last[2]
 
     # ---------------------------------------------------------------- dijital
+    # RTL doğrulama tasarımı: 8-bit sayıcı + kendini-denetleyen testbench.
+    # PDK/stdcell gerektirmez — saf RTL simülasyonu (xrun) yeterlidir.
+    RTL_DESIGN = """\
+// sayici.v — 8-bit senkron sayici (kopru RTL dogrulama tasarimi)
+module sayici (
+  input  wire       clk,
+  input  wire       rst_n,
+  input  wire       en,
+  output reg  [7:0] q
+);
+  always @(posedge clk or negedge rst_n)
+    if (!rst_n)      q <= 8'd0;
+    else if (en)     q <= q + 8'd1;
+endmodule
+"""
+
+    RTL_TB = """\
+// sayici_tb.v — kendini denetleyen testbench: reset, sayma, durdurma, tasma
+`timescale 1ns/1ps
+module sayici_tb;
+  reg clk = 0, rst_n = 0, en = 0;
+  wire [7:0] q;
+  integer hata = 0;
+
+  sayici dut(.clk(clk), .rst_n(rst_n), .en(en), .q(q));
+  always #5 clk = ~clk;
+
+  task kontrol(input [7:0] bekle, input [127:0] ad);
+    if (q !== bekle) begin
+      $display("HATA [%0s]: q=%0d beklenen=%0d (t=%0t)", ad, q, bekle, $time);
+      hata = hata + 1;
+    end else
+      $display("OK   [%0s]: q=%0d (t=%0t)", ad, q, $time);
+  endtask
+
+  initial begin
+    #12 rst_n = 1;               // reset birak
+    kontrol(8'd0, "reset");
+    en = 1;                      // 10 cevrim say
+    repeat (10) @(posedge clk);
+    #1 kontrol(8'd10, "sayma");
+    en = 0;                      // dur: deger korunmali
+    repeat (5) @(posedge clk);
+    #1 kontrol(8'd10, "durdurma");
+    en = 1;                      // 246 cevrim daha: 256 -> tasma -> 0
+    repeat (246) @(posedge clk);
+    #1 kontrol(8'd0, "tasma");
+    if (hata == 0) $display("TB_SONUC: PASS (4/4 kontrol gecti)");
+    else           $display("TB_SONUC: FAIL (%0d hata)", hata);
+    $finish;
+  end
+endmodule
+"""
+
+    def rtl_sim(self):
+        """Xcelium (xrun) ile uçtan uca RTL simülasyonu — dijital ilk tur.
+
+        Sayıcı tasarımını ve testbench'i workdir'e yazar, xrun ile derleyip
+        simüle eder; testbench'in TB_SONUC satırı sonucu taşır.
+        """
+        d = f"{self.workdir}/bridge_test/rtl"
+        script = (
+            f"command -v xrun >/dev/null || {{ echo XRUN_YOK; exit 1; }}; "
+            f"mkdir -p {d} && cd {d} && "
+            f"cat > sayici.v <<'RTL_EOF'\n{self.RTL_DESIGN}RTL_EOF\n"
+            f"cat > sayici_tb.v <<'RTL_EOF'\n{self.RTL_TB}RTL_EOF\n"
+            f"xrun -q sayici.v sayici_tb.v 2>&1 | tail -30")
+        return self.run(script, timeout=900)
+
+    # ------------------------------------------------------------ tcl/batch
     def run_tcl(self, tool, script_path):
         """Dijital araçları (genus/innovus/modus...) TCL betiğiyle batch koşar."""
         return self.run(
