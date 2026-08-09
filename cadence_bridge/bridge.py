@@ -414,6 +414,7 @@ saveOptions options save=allpub
     # PDK/stdcell gerektirmez — saf RTL simülasyonu (xrun) yeterlidir.
     RTL_DESIGN = """\
 // sayici.v — 8-bit senkron sayici (kopru RTL dogrulama tasarimi)
+`timescale 1ns/1ps
 module sayici (
   input  wire       clk,
   input  wire       rst_n,
