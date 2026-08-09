@@ -522,15 +522,20 @@ endmodule
             f"command -v genus >/dev/null || {{ echo GENUS_YOK; exit 1; }}; "
             f"cd {d} && "
             f"cat > sayici.v <<'RTL_EOF'\n{self.RTL_DESIGN}RTL_EOF\n"
-            # TCL_EOF tirnak SIZ: $LIB kabukta genislesin
+            # TCL_EOF tirnak SIZ: $LIB kabukta genislesin. Betik Stylus
+            # (common UI) lehcesindedir — kullanicinin Genus'u o modda
+            # aciliyor (legacy komutlar TUI-509 ile reddedildi).
             f"cat > synth.tcl <<TCL_EOF\n"
-            f"set_attribute library [list $LIB]\n"
+            f"read_libs $LIB\n"
             f"read_hdl sayici.v\n"
             f"elaborate sayici\n"
-            f"synthesize -to_mapped -effort medium\n"
-            f"report area > area.rpt\n"
-            f"report gates > gates.rpt\n"
-            f"report timing > timing.rpt\n"
+            f"syn_generic\n"
+            f"syn_map\n"
+            f"syn_opt\n"
+            f"puts ---RAPOR_BASLA---\n"
+            f"report_area\n"
+            f"report_gates\n"
+            f"report_timing\n"
             f"write_hdl > sayici_syn.v\n"
             f"puts SENTEZ_TAMAM\n"
             f"quit\n"
@@ -538,9 +543,11 @@ endmodule
             f"genus -no_gui -files synth.tcl -log genus.log "
             f"> genus_stdout.log 2>&1; echo GENUS_RC=$?; "
             f"grep -m1 SENTEZ_TAMAM genus_stdout.log genus.log 2>/dev/null; "
-            f"echo ---AREA---; head -15 area.rpt 2>/dev/null; "
-            f"echo ---GATES---; tail -12 gates.rpt 2>/dev/null; "
-            f"echo ---NETLIST---; head -20 sayici_syn.v 2>/dev/null; "
+            # raporlar stdout'a akar; marker'dan itibaren dok
+            f"echo ---RAPORLAR---; "
+            f"awk '/---RAPOR_BASLA---/{{f=1;next}} f' genus_stdout.log "
+            f"2>/dev/null | head -80; "
+            f"echo ---NETLIST---; head -15 sayici_syn.v 2>/dev/null; "
             f"echo ---HATALAR---; grep -iE '(^|\\s)error' genus.log "
             f"genus_stdout.log 2>/dev/null | head -8")
         return self.run(script, timeout=1800)
