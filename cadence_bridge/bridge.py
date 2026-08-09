@@ -509,13 +509,23 @@ endmodule
         d = f"{self.workdir}/bridge_test/synth"
         lib_dir = f"{self.workdir}/bridge_test/stdlib"
         script = (
-            f"NLDM=$(find {self.STCLIB_ROOT} -name '*nldm.tar.gz' | head -1); "
+            f"echo BULUNAN_NLDM_ARSIVLERI:; "
+            f"find {self.STCLIB_ROOT} -name '*nldm.tar.gz' 2>/dev/null "
+            f"| sed 's|.*/||'; "
+            # 'cg' (coarse-grain power gating) kutuphanelerinde temel lojik
+            # kapilar YOKTUR (LBR-171/172); once cg olmayan set tercih edilir.
+            f"NLDM=$(find {self.STCLIB_ROOT} -name '*nldm.tar.gz' "
+            f"| grep -v cg | head -1); "
+            f'[ -n "$NLDM" ] || NLDM=$(find {self.STCLIB_ROOT} '
+            f"-name '*nldm.tar.gz' | head -1); "
             f'[ -n "$NLDM" ] || {{ echo NLDM_YOK; exit 1; }}; '
+            f'echo "SECILEN_ARSIV: $NLDM"; '
             f"mkdir -p {lib_dir} {d}; "
-            # tipik (tc) kose .lib'i; yoksa arsivi ac ve tekrar ara
-            f"LIB=$(find {lib_dir} -name '*tc.lib' | head -1); "
+            # tipik (tc) kose .lib'i (cg'siz oncelikli); yoksa arsivi ac
+            f"LIB=$(find {lib_dir} -name '*tc.lib' | grep -v cg | head -1); "
             f'if [ -z "$LIB" ]; then tar xzf "$NLDM" -C {lib_dir}; '
-            f"LIB=$(find {lib_dir} -name '*tc.lib' | head -1); fi; "
+            f"LIB=$(find {lib_dir} -name '*tc.lib' | grep -v cg | head -1); fi; "
+            f'[ -n "$LIB" ] || LIB=$(find {lib_dir} -name "*tc.lib" | head -1); '
             f'[ -n "$LIB" ] || LIB=$(find {lib_dir} -name "*.lib" | head -1); '
             f'[ -n "$LIB" ] || {{ echo LIB_YOK; exit 1; }}; '
             f'echo "KULLANILAN_LIB: $LIB"; '
@@ -538,7 +548,7 @@ endmodule
             f"report_timing\n"
             f"write_hdl > sayici_syn.v\n"
             f"puts SENTEZ_TAMAM\n"
-            f"quit\n"
+            f"exit\n"
             f"TCL_EOF\n"
             f"genus -no_gui -files synth.tcl -log genus.log "
             f"> genus_stdout.log 2>&1; echo GENUS_RC=$?; "
