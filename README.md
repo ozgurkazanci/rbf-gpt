@@ -133,6 +133,21 @@ python llm_controller.py --task "..." --llm rbf-designer
 python finetune.py dataset --n-tasks 300 --out sft.jsonl
 ```
 
+### LM Studio ile AMD iGPU'da çıkarım (isteğe bağlı)
+
+Ollama, Radeon 780M gibi iGPU'ları desteklemez (CPU'da koşar). LM Studio ise
+Vulkan ile iGPU'yu kullanabilir ve OpenAI-uyumlu yerel sunucu açar:
+
+```powershell
+winget install ElementLabs.LMStudio
+# LM Studio: modeli yukle (rbf-designer GGUF'u da eklenebilir),
+# ayarlardan GPU offload'u acin, Developer sekmesinden Start Server (1234)
+python llm_controller.py --backend openai --llm rbf-designer --task "Eviriciyi Vm=0.6V olacak sekilde boyutlandir"
+```
+
+Not: üretim hızı (token/s) paylaşımlı RAM bant genişliğiyle sınırlıdır;
+iGPU kazancı üretimde mütevazı, uzun prompt işlemede belirgindir.
+
 `finetune_colab.ipynb`'yi Colab'da açın (T4 GPU), `sft.jsonl`'i yükleyin;
 notebook Qwen2.5-7B'yi LoRA ile ince ayar edip Ollama'ya alınabilen bir GGUF
 üretir. Karşılaştırma: ham qwen2.5:7b oranı 2.0'da sabit tutup Vm≈0.585'te
