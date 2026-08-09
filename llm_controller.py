@@ -110,6 +110,90 @@ class OllamaLLM:
         return msg
 
 
+class OpenAICompatLLM:
+    """OpenAI-uyumlu yerel sunucular (LM Studio, llama.cpp server) için arka uç.
+
+    LM Studio, Vulkan ile AMD 780M iGPU'yu kullanabilir; sunucusu
+    http://localhost:1234/v1 adresinde OpenAI API'si konuşur. Bu sınıf,
+    ajan döngüsünün Ollama-biçimli mesajlarını OpenAI biçimine çevirir
+    (araç sonuçlarını tool_call_id ile eşler) ve yanıtı geri normalize eder.
+    """
+
+    def __init__(self, model="rbf-designer", host="http://localhost:1234"):
+        self.model, self.host = model, host.rstrip("/")
+
+    def _to_openai(self, messages):
+        cikti, bekleyen_idler = [], []
+        for m in messages:
+            rol = m.get("role")
+            if rol == "assistant" and m.get("tool_calls"):
+                calls = []
+                for i, c in enumerate(m["tool_calls"]):
+                    fn = c.get("function", {})
+                    args = fn.get("arguments", {})
+                    if not isinstance(args, str):
+                        args = json.dumps(args)
+                    cid = c.get("id") or f"call_{len(cikti)}_{i}"
+                    bekleyen_idler.append(cid)
+                    calls.append({"id": cid, "type": "function",
+                                  "function": {"name": fn.get("name", ""),
+                                               "arguments": args}})
+                cikti.append({"role": "assistant",
+                              "content": m.get("content") or None,
+                              "tool_calls": calls})
+            elif rol == "tool":
+                cid = bekleyen_idler.pop(0) if bekleyen_idler else "call_0"
+                cikti.append({"role": "tool", "tool_call_id": cid,
+                              "content": m.get("content", "")})
+            else:
+                cikti.append({"role": rol, "content": m.get("content", "")})
+        return cikti
+
+    def chat(self, messages, tools):
+        govde = json.dumps({
+            "model": self.model,
+            "messages": self._to_openai(messages),
+            "tools": [{"type": "function",
+                       "function": {"name": t["name"],
+                                    "description": t["description"],
+                                    "parameters": t["input_schema"]}}
+                      for t in tools],
+            "stream": False, "temperature": 0.3}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self.host}/v1/chat/completions", data=govde,
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer lm-studio"})
+        try:
+            with urllib.request.urlopen(req, timeout=300) as r:
+                ham = r.read()
+        except urllib.error.HTTPError as exc:
+            try:
+                detay = exc.read().decode("utf-8", "replace")[:300]
+            except OSError:
+                detay = ""
+            raise RuntimeError(
+                f"LM Studio HTTP {exc.code}: {detay or exc.reason}\n"
+                "LM Studio'da model yuklu ve secili mi?")
+        except (OSError, http.client.HTTPException) as exc:
+            raise RuntimeError(
+                f"OpenAI-uyumlu sunucuya ulasilamadi ({self.host}): {exc}\n"
+                "LM Studio acik mi? Developer sekmesinden 'Start Server' "
+                "yapildi mi (varsayilan port 1234)?")
+        try:
+            yanit = json.loads(ham)
+            mesaj = yanit["choices"][0]["message"]
+        except (json.JSONDecodeError, KeyError, IndexError):
+            raise RuntimeError(f"Beklenmedik sunucu yaniti: {ham[:200]!r}")
+        # Ajan dongusunun bekledigi bicime normalize et
+        calls = [{"id": tc.get("id"),
+                  "function": {"name": tc.get("function", {}).get("name", ""),
+                               "arguments": tc.get("function", {})
+                               .get("arguments", "{}")}}
+                 for tc in (mesaj.get("tool_calls") or [])]
+        return {"role": "assistant", "content": mesaj.get("content") or "",
+                "tool_calls": calls}
+
+
 class LLMAgent:
     """Araç-çağrı döngüsü: model karar verir, araçlar ölçer."""
 
@@ -216,8 +300,14 @@ def main():
     p.add_argument("--model", default="surrogate.pt",
                    help="vekil model dosyasi (--simulator surrogate)")
     p.add_argument("--llm", default="qwen2.5:7b",
-                   help="Ollama model adi (qwen2.5:7b, llama3.1:8b ...)")
-    p.add_argument("--host", default="http://localhost:11434")
+                   help="model adi (Ollama: qwen2.5:7b / rbf-designer; "
+                        "LM Studio: yuklu modelin kimligi)")
+    p.add_argument("--backend", choices=["ollama", "openai"],
+                   default="ollama",
+                   help="'openai' = LM Studio / llama.cpp sunucusu "
+                        "(Vulkan ile AMD iGPU kullanabilir)")
+    p.add_argument("--host", default=None,
+                   help="varsayilan: ollama icin :11434, openai icin :1234")
     p.add_argument("--max-turns", type=int, default=16)
     p.add_argument("--max-measurements", type=int, default=24,
                    help="toplam olcum butcesi (gercek Spectre'da maliyeti "
@@ -226,11 +316,17 @@ def main():
     args = p.parse_args()
 
     tools = make_tools(args.simulator, args.model, args.vdd)
-    print(f"Simulator: {args.simulator} | LLM: {args.llm} | "
-          f"olcum butcesi: {args.max_measurements}")
+    if args.backend == "openai":
+        host = args.host or "http://localhost:1234"
+        llm = OpenAICompatLLM(args.llm, host)
+    else:
+        host = args.host or "http://localhost:11434"
+        llm = OllamaLLM(args.llm, host)
+    print(f"Simulator: {args.simulator} | LLM: {args.llm} "
+          f"({args.backend} @ {host}) | olcum butcesi: "
+          f"{args.max_measurements}")
     print(f"Gorev: {args.task}\n")
-    agent = LLMAgent(OllamaLLM(args.llm, args.host), tools,
-                     max_turns=args.max_turns,
+    agent = LLMAgent(llm, tools, max_turns=args.max_turns,
                      max_measurements=args.max_measurements)
     try:
         agent.run(args.task)
