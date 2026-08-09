@@ -550,6 +550,9 @@ endmodule
             f"puts SENTEZ_TAMAM\n"
             f"exit\n"
             f"TCL_EOF\n"
+            # bayat loglar yeni kosunun raporuna sizmasin (genus, mevcut
+            # genus.log varken yenisini genus.log.1 olarak yazar)
+            f"rm -f genus.log* genus_stdout.log; "
             f"genus -no_gui -files synth.tcl -log genus.log "
             f"> genus_stdout.log 2>&1; echo GENUS_RC=$?; "
             f"grep -m1 SENTEZ_TAMAM genus_stdout.log genus.log 2>/dev/null; "
